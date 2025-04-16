@@ -8,9 +8,12 @@
 
 #ifdef _WIN32
 #include <direct.h>
+#ifndef NXDK
 #include <io.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #else
 #include <dirent.h>
 #include <sys/stat.h>
@@ -186,32 +189,51 @@ void compat_makepath(char* path, const char* drive, const char* dir, const char*
 #endif
 }
 
+int compat_open(const char* filePath, int flags)
+{
+    const char* mode = (flags & O_WRONLY) ? "wb" : "rb";
+    FILE* fp = fopen(filePath, mode);
+    return fp ? reinterpret_cast<intptr_t>(fp) : -1;
+}
+
+int compat_close(int fileHandle)
+{
+    FILE* fp = reinterpret_cast<FILE*>(fileHandle);
+    int result = fclose(fp);
+    return result == 0 ? 0 : -1;
+}
+
 int compat_read(int fileHandle, void* buf, unsigned int size)
 {
-    return read(fileHandle, buf, size);
+    FILE* fp = reinterpret_cast<FILE*>(fileHandle);
+    return fread(buf, 1, size, fp);
 }
 
 int compat_write(int fileHandle, const void* buf, unsigned int size)
 {
-    return write(fileHandle, buf, size);
+    FILE* fp = reinterpret_cast<FILE*>(fileHandle);
+    return fwrite(buf, 1, size, fp);
 }
 
 long compat_lseek(int fileHandle, long offset, int origin)
 {
-    return lseek(fileHandle, offset, origin);
+    FILE* fp = reinterpret_cast<FILE*>(fileHandle);
+    return fseek(fp, offset, origin) == 0 ? ftell(fp) : -1;
 }
 
-long compat_tell(int fd)
+long compat_tell(int fileHandle)
 {
-    return lseek(fd, 0, SEEK_CUR);
+    FILE* fp = reinterpret_cast<FILE*>(fileHandle);
+    return ftell(fp);
 }
 
-long compat_filelength(int fd)
+long compat_filelength(int fileHandle)
 {
-    long originalOffset = lseek(fd, 0, SEEK_CUR);
-    lseek(fd, 0, SEEK_SET);
-    long filesize = lseek(fd, 0, SEEK_END);
-    lseek(fd, originalOffset, SEEK_SET);
+    FILE* fp = reinterpret_cast<FILE*>(fileHandle);
+    long originalOffset = ftell(fp);
+    fseek(fp, 0, SEEK_END);
+    long filesize = ftell(fp);
+    fseek(fp, originalOffset, SEEK_SET);
     return filesize;
 }
 

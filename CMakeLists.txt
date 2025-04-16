@@ -16,6 +16,10 @@ endif()
 
 project(${EXECUTABLE_NAME})
 
+if (NXDK) 
+include(FindPkgConfig)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_EXTENSIONS NO)
@@ -345,10 +349,14 @@ if(APPLE)
     set(MACOSX_BUNDLE_BUNDLE_VERSION "1.0.0")
 endif()
 
-if((NOT ${CMAKE_SYSTEM_NAME} MATCHES "Linux") AND (NOT ${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD") AND (NOT ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD"))
+if((NOT ${CMAKE_SYSTEM_NAME} MATCHES "Linux") AND (NOT ${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD") AND (NOT ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD") AND (NOT NXDK))
     add_subdirectory("third_party/sdl2")
 else()
+    if(NXDK)
+    pkg_search_module(SDL2 REQUIRED sdl2)
+    else()
     find_package(SDL2)
+    endif()
 endif()
 
 add_subdirectory("third_party/adecode")

@@ -27,6 +27,8 @@ char* compat_strlwr(char* string);
 char* compat_itoa(int value, char* buffer, int radix);
 void compat_splitpath(const char* path, char* drive, char* dir, char* fname, char* ext);
 void compat_makepath(char* path, const char* drive, const char* dir, const char* fname, const char* ext);
+int compat_open(const char* filePath, int flags);
+int compat_close(int fileHandle);
 int compat_read(int fileHandle, void* buf, unsigned int size);
 int compat_write(int fileHandle, const void* buf, unsigned int size);
 long compat_lseek(int fileHandle, long offset, int origin);
