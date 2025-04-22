@@ -240,7 +240,7 @@ int art_init()
 
         head_info[headIndex].neutralFidgetCount = atoi(sep2 + 1);
 
-        sep4 = strpbrk(sep3 + 1, " ,;\t\n");
+        sep4 = (char*)strpbrk(sep3 + 1, " ,;\t\n");
         if (sep4 != NULL) {
             *sep4 = '\0';
         }
@@ -677,9 +677,9 @@ int art_read_lst(const char* path, char** artListPtr, int* artListSizePtr)
     }
 
     while (db_fgets(string, sizeof(string), stream)) {
-        char* brk = strpbrk(string, " ,;\r\t\n");
+        const char* brk = strpbrk(string, " ,;\r\t\n");
         if (brk != NULL) {
-            *brk = '\0';
+            *(char*)brk = '\0';
         }
 
         strncpy(artList, string, 12);

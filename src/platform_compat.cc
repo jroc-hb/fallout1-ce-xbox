@@ -6,14 +6,18 @@
 #include <windows.h>
 #endif
 
+#ifdef NXDK
+#define O_WRONLY 0x01 // Define O_WRONLY manually for NXDK
+#endif
+
 #ifdef _WIN32
 #include <direct.h>
 #ifndef NXDK
 #include <io.h>
+#include <fcntl.h>
 #endif
 #include <stdio.h>
 #include <stdlib.h>
-#include <fcntl.h>
 #else
 #include <dirent.h>
 #include <sys/stat.h>
@@ -21,7 +25,9 @@
 #endif
 
 #ifdef _WIN32
-#include <timeapi.h>
+    #ifndef NXDK
+    #include <timeapi.h>
+    #endif
 #else
 #include <chrono>
 #endif
@@ -57,7 +63,7 @@ char* compat_itoa(int value, char* buffer, int radix)
 
 void compat_splitpath(const char* path, char* drive, char* dir, char* fname, char* ext)
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(NXDK)
     _splitpath(path, drive, dir, fname, ext);
 #else
     const char* driveStart = path;
@@ -126,7 +132,7 @@ void compat_splitpath(const char* path, char* drive, char* dir, char* fname, cha
 
 void compat_makepath(char* path, const char* drive, const char* dir, const char* fname, const char* ext)
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(NXDK)
     _makepath(path, drive, dir, fname, ext);
 #else
     path[0] = '\0';
@@ -244,7 +250,9 @@ int compat_mkdir(const char* path)
     compat_windows_path_to_native(nativePath);
     compat_resolve_path(nativePath);
 
-#ifdef _WIN32
+#ifdef NXDK
+    return CreateDirectory(nativePath, NULL) ? 0 : -1;
+#elif defined(_WIN32)
     return mkdir(nativePath);
 #else
     return mkdir(nativePath, 0755);
@@ -253,8 +261,11 @@ int compat_mkdir(const char* path)
 
 unsigned int compat_timeGetTime()
 {
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(NXDK)
     return timeGetTime();
+#elif defined(NXDK)
+    // Use SDL_GetTicks for NXDK
+    return SDL_GetTicks();
 #else
     static auto start = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();

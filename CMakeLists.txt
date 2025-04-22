@@ -1,3 +1,8 @@
+if (NXDK)
+    set (XBE_TITLE fallout-ce)
+    set (XBOX_ISO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fallout-ce)
+endif()
+
 cmake_minimum_required(VERSION 3.13)
 
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
@@ -16,7 +21,9 @@ endif()
 
 project(${EXECUTABLE_NAME})
 
-if (NXDK) 
+if (NXDK)
+add_compile_options(-Wno-builtin-macro-redefined)
+add_definitions(-DXBOX -DNXDK)
 include(FindPkgConfig)
 endif()
 
@@ -385,4 +392,26 @@ if(APPLE)
     endif()
 
     include(CPack)
+endif()
+
+if (NXDK)
+#Post-build exe to xbe conversion
+add_custom_target(cxbe_convert ALL
+    COMMAND "${CMAKE_COMMAND}" -E echo "CMAKE_CURRENT_BINARY_DIR: ${XBE_TITLE}"
+    VERBATIM COMMAND "${CMAKE_COMMAND}" -E env ./tools/cxbe/cxbe -OUT:${CMAKE_CURRENT_BINARY_DIR}/fallout-ce/default.xbe -TITLE:fallout-ce ${CMAKE_CURRENT_BINARY_DIR}/fallout-ce.exe
+    WORKING_DIRECTORY ${NXDK_DIR}
+    COMMENT "CXBE Conversion: [EXE -> XBE]"
+)
+add_dependencies(cxbe_convert fallout-ce)
+
+#Post-build xbe to xiso conversion
+add_custom_target(xbe_iso ALL
+    VERBATIM COMMAND "${CMAKE_COMMAND}" -E env ${NXDK_DIR}/tools/extract-xiso/build/extract-xiso -c ${XBOX_ISO_DIR}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "CXBE Conversion: [XBE -> XISO]"
+)
+add_dependencies(xbe_iso cxbe_convert)
+
+set_target_properties(cxbe_convert PROPERTIES OUTPUT_QUIET ON)
+set_target_properties(xbe_iso PROPERTIES OUTPUT_QUIET ON)
 endif()
