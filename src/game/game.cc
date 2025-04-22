@@ -57,6 +57,11 @@
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
 
+#ifdef NXDK
+//debug logging
+#include <xboxkrnl/xboxkrnl.h>
+#endif
+
 namespace fallout {
 
 #define HELP_SCREEN_WIDTH 640
@@ -126,22 +131,28 @@ DB_DATABASE* critter_db_handle;
 // 0x43B080
 int game_init(const char* windowTitle, bool isMapper, int font, int flags, int argc, char** argv)
 {
+    DbgPrint("game_init\n");
     char path[COMPAT_MAX_PATH];
 
     if (gmemory_init() == -1) {
+        DbgPrint("gmemory_init failed\n");
         return -1;
     }
 
     gconfig_init(isMapper, argc, argv);
+    DbgPrint("gconfig_init done\n");
 
     game_in_mapper = isMapper;
 
     if (game_init_databases() == -1) {
+        DbgPrint("game_init_databases failed\n");
         gconfig_exit(false);
         return -1;
     }
+    DbgPrint("game_init_databases done\n");
 
     win_set_minimized_title(windowTitle);
+    DbgPrint("win_set_minimized_title done\n");
 
     VideoOptions video_options;
     video_options.width = 640;
@@ -1226,49 +1237,70 @@ static int game_init_databases()
     char* main_file_name;
     char* patch_file_name;
 
+    DbgPrint("game_init_databases: Start\n");
+
     hashing = 0;
     main_file_name = NULL;
     patch_file_name = NULL;
 
     if (config_get_value(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_HASHING_KEY, &hashing)) {
+        DbgPrint("game_init_databases: Enabling hash table\n");
         db_enable_hash_table();
     }
 
     config_get_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_DAT_KEY, &main_file_name);
     if (*main_file_name == '\0') {
+        DbgPrint("game_init_databases: Master DAT file name is empty\n");
         main_file_name = NULL;
+    } else {
+        DbgPrint("game_init_databases: Master DAT file name: %s\n", main_file_name);
     }
 
     config_get_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &patch_file_name);
     if (*patch_file_name == '\0') {
+        DbgPrint("game_init_databases: Master patches file name is empty\n");
         patch_file_name = NULL;
+    } else {
+        DbgPrint("game_init_databases: Master patches file name: %s\n", patch_file_name);
     }
 
+    DbgPrint("game_init_databases: Initializing master database\n");
     master_db_handle = db_init(main_file_name, NULL, patch_file_name, 1);
     if (master_db_handle == INVALID_DATABASE_HANDLE) {
+        DbgPrint("game_init_databases: Failed to initialize master database\n");
         GNWSystemError("Could not find the master datafile. Please make sure the FALLOUT CD is in the drive and that you are running FALLOUT from the directory you installed it to.");
         return -1;
     }
 
     config_get_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_CRITTER_DAT_KEY, &main_file_name);
     if (*main_file_name == '\0') {
+        DbgPrint("game_init_databases: Critter DAT file name is empty\n");
         main_file_name = NULL;
+    } else {
+        DbgPrint("game_init_databases: Critter DAT file name: %s\n", main_file_name);
     }
 
     config_get_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_CRITTER_PATCHES_KEY, &patch_file_name);
     if (*patch_file_name == '\0') {
+        DbgPrint("game_init_databases: Critter patches file name is empty\n");
         patch_file_name = NULL;
+    } else {
+        DbgPrint("game_init_databases: Critter patches file name: %s\n", patch_file_name);
     }
 
+    DbgPrint("game_init_databases: Initializing critter database\n");
     critter_db_handle = db_init(main_file_name, NULL, patch_file_name, 1);
     if (critter_db_handle == INVALID_DATABASE_HANDLE) {
+        DbgPrint("game_init_databases: Failed to initialize critter database\n");
         db_select(master_db_handle);
         GNWSystemError("Could not find the critter datafile. Please make sure the FALLOUT CD is in the drive and that you are running FALLOUT from the directory you installed it to.");
         return -1;
     }
 
+    DbgPrint("game_init_databases: Selecting master database\n");
     db_select(master_db_handle);
 
+    DbgPrint("game_init_databases: End\n");
     return 0;
 }
 

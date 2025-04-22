@@ -4,6 +4,11 @@
 #include <windows.h>
 #endif
 
+#ifdef NXDK
+//debug logging
+#include <xboxkrnl/xboxkrnl.h>
+#endif
+
 namespace fallout {
 
 #ifdef _WIN32
@@ -16,7 +21,9 @@ bool autorun_mutex_create()
 {
 #ifdef _WIN32
     #ifdef NXDK
+    DbgPrint("Creating autorun mutex\n");
     autorun_mutex = CreateMutexA((LPSECURITY_ATTRIBUTES)NULL, FALSE, "InterplayGenericAutorunMutex");
+    DbgPrint("Created autorun mutex\n");
     #else
     autorun_mutex = CreateMutexA(NULL, FALSE, "InterplayGenericAutorunMutex");
     #endif

@@ -9,6 +9,11 @@
 #include "plib/db/db.h"
 #include "plib/gnw/memory.h"
 
+#ifdef NXDK
+//debug logging
+#include <xboxkrnl/xboxkrnl.h>
+#endif
+
 namespace fallout {
 
 #define CONFIG_FILE_MAX_LINE_LENGTH 256
@@ -257,6 +262,7 @@ bool config_load(Config* config, const char* filePath, bool isDb)
     if (isDb) {
         DB_FILE* stream = db_fopen(filePath, "rb");
         if (stream != NULL) {
+            DbgPrint("config_load: stream was null! rb %s\n", filePath);
             while (db_fgets(string, sizeof(string), stream) != NULL) {
                 config_parse_line(config, string);
             }
@@ -265,6 +271,7 @@ bool config_load(Config* config, const char* filePath, bool isDb)
     } else {
         FILE* stream = compat_fopen(filePath, "rt");
         if (stream != NULL) {
+            DbgPrint("config_load: stream was null! rt %s\n", filePath);
             while (fgets(string, sizeof(string), stream) != NULL) {
                 config_parse_line(config, string);
             }

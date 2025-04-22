@@ -11,6 +11,11 @@
 #include "plib/gnw/svga.h"
 #include "plib/gnw/vcr.h"
 
+#ifdef NXDK
+//debug logging
+#include <xboxkrnl/xboxkrnl.h>
+#endif
+
 namespace fallout {
 
 typedef enum SelfrunState {
@@ -29,6 +34,7 @@ static int selfrun_state = SELFRUN_STATE_TURNED_OFF;
 // 0x496D60
 int selfrun_get_list(char*** fileListPtr, int* fileListLengthPtr)
 {
+    DbgPrint("selfrun_get_list\n");
     if (fileListPtr == NULL) {
         return -1;
     }

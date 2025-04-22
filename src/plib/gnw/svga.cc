@@ -5,6 +5,11 @@
 #include "plib/gnw/mouse.h"
 #include "plib/gnw/winmain.h"
 
+#ifdef NXDK
+#include <hal/video.h>
+#include <hal/debug.h>
+#endif
+
 namespace fallout {
 
 static bool createRenderer(int width, int height);
@@ -82,27 +87,68 @@ void GNW95_ShowRect(unsigned char* src, unsigned int srcPitch, unsigned int a3, 
 
 bool svga_init(VideoOptions* video_options)
 {
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+    // #ifdef NXDK
+    // Sleep(1000);
+    // // Based on LithiumX solution to detect Xbox resolution: https://github.com/Ryzee119/LithiumX/blob/f4471d287d44abc84803d3b901bd4aa7ed459689/src/platform/xbox/platform.c#L99
+    // // First try 720p. This is the preferred resolution
+    // int SCREEN_WIDTH = 1280;
+    // int SCREEN_HEIGHT = 720;
+    // if (XVideoSetMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, REFRESH_DEFAULT) == false)
+    // {
+    //     // Fall back to 640*480
+    //     SCREEN_WIDTH = 640;
+    //     SCREEN_HEIGHT = 480;
+    //     if (XVideoSetMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, REFRESH_DEFAULT) == false)
+    //     {
+    //         // Try whatever else the xbox is happy with
+    //         VIDEO_MODE xmode;
+    //         void *p = NULL;
+    //         while (XVideoListModes(&xmode, 0, 0, &p))
+    //         {
+    //             if (xmode.width == 1080)
+    //                 continue;
+    //             if (xmode.width == 720)
+    //                 continue; // 720x480 doesnt work on pbkit for some reason
+    //             XVideoSetMode(xmode.width, xmode.height, xmode.bpp, xmode.refresh);
+    //             ;
+    //             break;
+    //         }
+
+    //         SCREEN_WIDTH = xmode.width;
+    //         SCREEN_HEIGHT = xmode.height;
+    //     }
+    // }
+    // #endif
+
+    XVideoSetMode(640, 480, 32, REFRESH_DEFAULT);
+
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+
+    debugPrint("Initializing the video");
 
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
         return false;
     }
 
+    #ifdef NXDK
+    Uint32 windowFlags = SDL_WINDOW_FULLSCREEN;
+    #else
     Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI;
 
     if (video_options->fullscreen) {
         windowFlags |= SDL_WINDOW_FULLSCREEN;
     }
+    #endif
 
     gSdlWindow = SDL_CreateWindow(GNW95_title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-        video_options->width * video_options->scale,
-        video_options->height * video_options->scale,
+        640 * video_options->scale,
+        480 * video_options->scale,
         windowFlags);
     if (gSdlWindow == NULL) {
         return false;
     }
 
-    if (!createRenderer(video_options->width, video_options->height)) {
+    if (!createRenderer(640, 480)) {
         destroyRenderer();
 
         SDL_DestroyWindow(gSdlWindow);
@@ -112,8 +158,8 @@ bool svga_init(VideoOptions* video_options)
     }
 
     gSdlSurface = SDL_CreateRGBSurface(0,
-        video_options->width,
-        video_options->height,
+        640,
+        480,
         8,
         0,
         0,
@@ -138,8 +184,8 @@ bool svga_init(VideoOptions* video_options)
 
     scr_size.ulx = 0;
     scr_size.uly = 0;
-    scr_size.lrx = video_options->width - 1;
-    scr_size.lry = video_options->height - 1;
+    scr_size.lrx = 640 - 1;
+    scr_size.lry = 480 - 1;
 
     mouse_blit_trans = NULL;
     scr_blit = GNW95_ShowRect;

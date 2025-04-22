@@ -14,6 +14,11 @@
 #include "plib/gnw/grbuf.h"
 #include "plib/gnw/memory.h"
 
+#ifdef NXDK
+//debug logging
+#include <xboxkrnl/xboxkrnl.h>
+#endif
+
 namespace fallout {
 
 typedef struct ArtListDescription {
@@ -239,8 +244,8 @@ int art_init()
         }
 
         head_info[headIndex].neutralFidgetCount = atoi(sep2 + 1);
-
-        sep4 = strpbrk(sep3 + 1, " ,;\t\n");
+        DbgPrint("THE FIRST PART THAT WAS MODIFIED...\n");
+        sep4 = (char*)strpbrk(sep3 + 1, " ,;\t\n");
         if (sep4 != NULL) {
             *sep4 = '\0';
         }
@@ -677,7 +682,8 @@ int art_read_lst(const char* path, char** artListPtr, int* artListSizePtr)
     }
 
     while (db_fgets(string, sizeof(string), stream)) {
-        char* brk = strpbrk(string, " ,;\r\t\n");
+        DbgPrint("THE SECOND PART THAT WAS MODIFIED...\n");
+        char* brk = (char*)strpbrk(string, " ,;\r\t\n");
         if (brk != NULL) {
             *brk = '\0';
         }

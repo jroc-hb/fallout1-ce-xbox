@@ -5,6 +5,11 @@
 
 #include "platform_compat.h"
 
+#ifdef NXDK
+//debug logging
+#include <xboxkrnl/xboxkrnl.h>
+#endif
+
 namespace fallout {
 
 // A flag indicating if `game_config` was initialized.
@@ -52,6 +57,7 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
     if (!config_init(&game_config)) {
         return false;
     }
+    DbgPrint("config_init done\n");
 
     // Initialize defaults.
     config_set_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_EXECUTABLE_KEY, "game");
@@ -118,8 +124,13 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
         config_set_value(&game_config, GAME_CONFIG_MAPPER_KEY, GAME_CONFIG_RUN_MAPPER_AS_GAME_KEY, 0);
         config_set_value(&game_config, GAME_CONFIG_MAPPER_KEY, GAME_CONFIG_DEFAULT_F8_AS_GAME_KEY, 1);
     }
+    DbgPrint("Big list of default configs done\n");
 
     // Make `fallout.cfg` file path.
+
+    #ifdef NXDK
+    snprintf(gconfig_file_name, sizeof(gconfig_file_name), "%s", GAME_CONFIG_FILE_NAME);
+    #else
     sep = strrchr(argv[0], '\\');
     if (sep != NULL) {
         *sep = '\0';
@@ -128,14 +139,18 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
     } else {
         strcpy(gconfig_file_name, GAME_CONFIG_FILE_NAME);
     }
+    #endif
+    DbgPrint("sep area done\n");
 
     // Read contents of `fallout.cfg` into config. The values from the file
     // will override the defaults above.
     config_load(&game_config, gconfig_file_name, false);
+    DbgPrint("config_load done\n");
 
     // Add key-values from command line, which overrides both defaults and
     // whatever was loaded from `fallout.cfg`.
     config_cmd_line_parse(&game_config, argc, argv);
+    DbgPrint("config_cmd_line_parse done\n");
 
     gconfig_initialized = true;
 

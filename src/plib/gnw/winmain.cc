@@ -16,6 +16,15 @@
 #include "platform/ios/paths.h"
 #endif
 
+#ifdef NXDK
+#include <nxdk/mount.h>
+#include <nxdk/path.h>
+#include <assert.h>
+#include <string.h>
+#include <windows.h>
+#include <xboxkrnl/xboxkrnl.h>
+#endif
+
 namespace fallout {
 
 // 0x53A290
@@ -31,6 +40,7 @@ char GNW95_title[256];
 
 int main(int argc, char* argv[])
 {
+    DbgPrint("int main\n");
     int rc;
 
 #if _WIN32
@@ -74,5 +84,34 @@ int main(int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {
+    DbgPrint("\n\n\n##################### Starting Fallout #####################\n");
+    if (!nxIsDriveMounted('D')) {
+        DbgPrint("Mounting D because it is not mounted\n");
+        // D: doesn't exist yet, so we create it
+        CHAR targetPath[MAX_PATH];
+        nxGetCurrentXbeNtPath(targetPath);
+
+        // Cut off the XBE file name by inserting a null-terminator
+        char *filenameStr;
+        filenameStr = strrchr(targetPath, '\\');
+        assert(filenameStr != NULL);
+        *(filenameStr + 1) = '\0';
+
+        // Mount the obtained path as D:
+        BOOL success;
+        success = nxMountDrive('D', targetPath);
+        DbgPrint("targetPath: %s\n", targetPath);
+        DbgPrint("Mounted D: %s\n", success ? "success" : "failed");
+        assert(success);
+        // Check if master.dat exists in the root of D
+        FILE* file = fopen("D:\\master.dat", "r");
+        if (file != NULL) {
+            DbgPrint("master.dat exists in the root of D:\\\n");
+            fclose(file);
+        } else {
+            DbgPrint("master.dat does not exist in the root of D:\\\n");
+        }
+    }
+
     return fallout::main(argc, argv);
 }

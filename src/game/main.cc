@@ -45,6 +45,11 @@
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
 
+#ifdef NXDK
+//debug logging
+#include <xboxkrnl/xboxkrnl.h>
+#endif
+
 namespace fallout {
 
 #define DEATH_WINDOW_WIDTH 640
@@ -88,11 +93,15 @@ static bool main_death_voiceover_done;
 // 0x4725E8
 int gnw_main(int argc, char** argv)
 {
+    DbgPrint("gnw_main\n");
+
     if (!autorun_mutex_create()) {
+        DbgPrint("Failed to create mutex\n");
         return 1;
     }
 
     if (!main_init_system(argc, argv)) {
+        DbgPrint("Failed to init system\n");
         return 1;
     }
 
@@ -223,9 +232,12 @@ int gnw_main(int argc, char** argv)
 // 0x4728CC
 static bool main_init_system(int argc, char** argv)
 {
+    DbgPrint("main_init_system\n");
     if (game_init("FALLOUT", false, 0, 0, argc, argv) == -1) {
+        DbgPrint("game_init failed\n");
         return false;
     }
+    DbgPrint("game_init done\n");
 
     // NOTE: Uninline.
     main_selfrun_init();
@@ -352,6 +364,7 @@ static void main_game_loop()
 // 0x472AE8
 static bool main_selfrun_init()
 {
+    DbgPrint("main_selfrun_init\n");
     if (main_selfrun_list != NULL) {
         // NOTE: Uninline.
         main_selfrun_exit();

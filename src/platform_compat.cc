@@ -10,10 +10,14 @@
 #include <direct.h>
 #ifndef NXDK
 #include <io.h>
+#include <fcntl.h>
+#endif
+
+#ifndef O_WRONLY
+#define O_WRONLY 0x01 // Define O_WRONLY if not defined
 #endif
 #include <stdio.h>
 #include <stdlib.h>
-#include <fcntl.h>
 #else
 #include <dirent.h>
 #include <sys/stat.h>
@@ -21,7 +25,9 @@
 #endif
 
 #ifdef _WIN32
+#ifndef NXDK
 #include <timeapi.h>
+#endif
 #else
 #include <chrono>
 #endif
@@ -57,9 +63,6 @@ char* compat_itoa(int value, char* buffer, int radix)
 
 void compat_splitpath(const char* path, char* drive, char* dir, char* fname, char* ext)
 {
-#ifdef _WIN32
-    _splitpath(path, drive, dir, fname, ext);
-#else
     const char* driveStart = path;
     if (path[0] == '/' && path[1] == '/') {
         path += 2;
@@ -121,14 +124,10 @@ void compat_splitpath(const char* path, char* drive, char* dir, char* fname, cha
         strncpy(ext, extStart, extSize);
         ext[extSize] = '\0';
     }
-#endif
 }
 
 void compat_makepath(char* path, const char* drive, const char* dir, const char* fname, const char* ext)
 {
-#ifdef _WIN32
-    _makepath(path, drive, dir, fname, ext);
-#else
     path[0] = '\0';
 
     if (drive != NULL) {
@@ -186,11 +185,11 @@ void compat_makepath(char* path, const char* drive, const char* dir, const char*
     }
 
     *path = '\0';
-#endif
 }
 
 int compat_open(const char* filePath, int flags)
 {
+    DbgPrint("compat_open: %s\n", filePath);
     const char* mode = (flags & O_WRONLY) ? "wb" : "rb";
     FILE* fp = fopen(filePath, mode);
     return fp ? reinterpret_cast<intptr_t>(fp) : -1;
@@ -205,6 +204,7 @@ int compat_close(int fileHandle)
 
 int compat_read(int fileHandle, void* buf, unsigned int size)
 {
+    DbgPrint("compat_read: %d\n", size);
     FILE* fp = reinterpret_cast<FILE*>(fileHandle);
     return fread(buf, 1, size, fp);
 }
@@ -245,7 +245,11 @@ int compat_mkdir(const char* path)
     compat_resolve_path(nativePath);
 
 #ifdef _WIN32
+    #ifdef NXDK
+    return CreateDirectoryA(nativePath, NULL);
+    #else
     return mkdir(nativePath);
+    #endif
 #else
     return mkdir(nativePath, 0755);
 #endif
@@ -253,6 +257,9 @@ int compat_mkdir(const char* path)
 
 unsigned int compat_timeGetTime()
 {
+#ifdef NXDK
+    return SDL_GetTicks();
+#else
 #ifdef _WIN32
     return timeGetTime();
 #else
@@ -260,15 +267,22 @@ unsigned int compat_timeGetTime()
     auto now = std::chrono::steady_clock::now();
     return static_cast<unsigned int>(std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count());
 #endif
+#endif
 }
 
 FILE* compat_fopen(const char* path, const char* mode)
 {
     char nativePath[COMPAT_MAX_PATH];
+    #ifdef NXDK
+    strcpy(nativePath, "D:\\");
+    strcat(nativePath, path);
+    return fopen(nativePath, mode);
+    #else
     strcpy(nativePath, path);
     compat_windows_path_to_native(nativePath);
     compat_resolve_path(nativePath);
     return fopen(nativePath, mode);
+    #endif
 }
 
 int compat_remove(const char* path)
@@ -364,6 +378,7 @@ void compat_resolve_path(char* path)
 
 char* compat_strdup(const char* string)
 {
+    DbgPrint("compat_strdup: %s\n", string);
     return SDL_strdup(string);
 }
 

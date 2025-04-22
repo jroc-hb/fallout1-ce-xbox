@@ -1,3 +1,6 @@
+set (XBE_TITLE fallout-ce)
+set (XBOX_ISO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/XISO)
+
 cmake_minimum_required(VERSION 3.13)
 
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
@@ -19,6 +22,16 @@ project(${EXECUTABLE_NAME})
 if (NXDK) 
 include(FindPkgConfig)
 endif()
+
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Debug)
+endif()
+set(CMAKE_CXX_FLAGS_DEBUG "-g")
+set(CMAKE_C_FLAGS_DEBUG "-g")
+
+# Stop lots of warning spam
+add_compile_options(-Wno-builtin-macro-redefined)
+add_definitions(-DXBOX -DNXDK)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
@@ -385,4 +398,25 @@ if(APPLE)
     endif()
 
     include(CPack)
+endif()
+
+if (NXDK)
+    #Post-build exe to xbe conversion
+    add_custom_target(cxbe_convert ALL
+        VERBATIM COMMAND "${CMAKE_COMMAND}" -E env ./tools/cxbe/cxbe -OUT:${XBOX_ISO_DIR}/default.xbe -TITLE:${XBE_TITLE} ${CMAKE_CURRENT_BINARY_DIR}/${XBE_TITLE}.exe
+        WORKING_DIRECTORY ${NXDK_DIR}
+        COMMENT "CXBE Conversion: [EXE -> XBE]"
+    )
+    add_dependencies(cxbe_convert fallout-ce)
+
+    #Post-build xbe to xiso conversion
+    add_custom_target(xbe_iso ALL
+        VERBATIM COMMAND "${CMAKE_COMMAND}" -E env ${NXDK_DIR}/tools/extract-xiso/build/extract-xiso -c ${XBOX_ISO_DIR}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "CXBE Conversion: [XBE -> XISO]"
+    )
+    add_dependencies(xbe_iso cxbe_convert)
+
+    set_target_properties(cxbe_convert PROPERTIES OUTPUT_QUIET ON)
+    set_target_properties(xbe_iso PROPERTIES OUTPUT_QUIET ON)
 endif()

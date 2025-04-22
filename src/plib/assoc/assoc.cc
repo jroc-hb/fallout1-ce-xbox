@@ -6,6 +6,11 @@
 
 #include "platform_compat.h"
 
+#ifdef NXDK
+//debug logging
+#include <xboxkrnl/xboxkrnl.h>
+#endif
+
 namespace fallout {
 
 // NOTE: I guess this marker is used as a type discriminator for implementing
@@ -330,42 +335,54 @@ int assoc_copy(assoc_array* dst, assoc_array* src)
 // NOTE: Unused.
 //
 // 0x4DA090
+// Reads a 4-byte integer (long) from the given file pointer in big-endian order.
+//
+// Parameters:
+// - fp: Pointer to the file to read from.
+// - theLong: Pointer to a long variable where the read value will be stored.
+//
+// Returns:
+// - 0 on success.
+// - -1 if an error occurs (e.g., end of file is reached before reading 4 bytes).
 static int assoc_read_long(FILE* fp, long* theLong)
 {
-    int c;
-    int temp;
+    int c;      // Temporary variable to store each byte read from the file.
+    int temp;   // Temporary variable to construct the 4-byte integer.
 
+    // Read the first byte and store it in temp.
+    c = fgetc(fp);
+    if (c == -1) { // Check for end of file or error.
+        return -1;
+    }
+    temp = (c & 0xFF); // Mask to ensure only the lower 8 bits are used.
+
+    // Read the second byte and shift the previous value left by 8 bits.
     c = fgetc(fp);
     if (c == -1) {
         return -1;
     }
-
-    temp = (c & 0xFF);
-
-    c = fgetc(fp);
-    if (c == -1) {
-        return -1;
-    }
-
     temp = (temp << 8) | (c & 0xFF);
 
+    // Read the third byte and shift the previous value left by 8 bits.
     c = fgetc(fp);
     if (c == -1) {
         return -1;
     }
-
     temp = (temp << 8) | (c & 0xFF);
 
+    // Read the fourth byte and shift the previous value left by 8 bits.
     c = fgetc(fp);
     if (c == -1) {
         return -1;
     }
-
     temp = (temp << 8) | (c & 0xFF);
 
+    // Store the constructed 4-byte integer in the provided pointer.
     *theLong = temp;
 
-    return 0;
+    DbgPrint("assoc_read_long: Read long value = %ld\n", temp);
+
+    return 0; // Indicate success.
 }
 
 // NOTE: Unused.
@@ -387,6 +404,8 @@ static int assoc_read_assoc_array(FILE* fp, assoc_array* a)
     // NOTE: original code reads `a->list` pointer which is meaningless.
     if (assoc_read_long(fp, &temp) != 0) return -1;
 
+    DbgPrint("a->size = %d\n", a->size);
+
     return 0;
 }
 
@@ -395,7 +414,10 @@ static int assoc_read_assoc_array(FILE* fp, assoc_array* a)
 // 0x4DA158
 int assoc_load(FILE* fp, assoc_array* a, int flags)
 {
+    DbgPrint("assoc_load: a->max = %d\n", a->max);
+
     if (a->init_flag != DICTIONARY_MARKER) {
+        DbgPrint("assoc_load: Invalid init_flag\n");
         return -1;
     }
 
@@ -415,17 +437,22 @@ int assoc_load(FILE* fp, assoc_array* a, int flags)
     }
 
     if (assoc_read_assoc_array(fp, a) != 0) {
+        DbgPrint("assoc_load: Failed to read assoc array\n");
         return -1;
     }
 
     a->list = NULL;
 
     if (a->max <= 0) {
+        DbgPrint("assoc_load: Max size is less than or equal to 0\n");
         return 0;
     }
 
+    DbgPrint("assoc_load: a->max PART 2 = %d\n", a->max);
+
     a->list = (assoc_pair*)internal_malloc(sizeof(*a->list) * a->max);
     if (a->list == NULL) {
+        DbgPrint("assoc_load: Failed to allocate memory for list\n");
         return -1;
     }
 
@@ -436,6 +463,7 @@ int assoc_load(FILE* fp, assoc_array* a, int flags)
     }
 
     if (a->size <= 0) {
+        DbgPrint("assoc_load: Size is less than or equal to 0\n");
         return 0;
     }
 
@@ -443,36 +471,43 @@ int assoc_load(FILE* fp, assoc_array* a, int flags)
         assoc_pair* entry = &(a->list[index]);
         int keyLength = fgetc(fp);
         if (keyLength == -1) {
+            DbgPrint("assoc_load: Failed to read key length at index %d\n", index);
             return -1;
         }
 
         entry->name = (char*)internal_malloc(keyLength + 1);
         if (entry->name == NULL) {
+            DbgPrint("assoc_load: Failed to allocate memory for key at index %d\n", index);
             return -1;
         }
 
         if (fgets(entry->name, keyLength + 1, fp) == NULL) {
+            DbgPrint("assoc_load: Failed to read key at index %d\n", index);
             return -1;
         }
 
         if (a->datasize != 0) {
             entry->data = internal_malloc(a->datasize);
             if (entry->data == NULL) {
+                DbgPrint("assoc_load: Failed to allocate memory for data at index %d\n", index);
                 return -1;
             }
 
             if (a->load_save_funcs.loadFunc != NULL) {
                 if (a->load_save_funcs.loadFunc(fp, entry->data, a->datasize, flags) != 0) {
+                    DbgPrint("assoc_load: Custom loadFunc failed at index %d\n", index);
                     return -1;
                 }
             } else {
                 if (fread(entry->data, a->datasize, 1, fp) != 1) {
+                    DbgPrint("assoc_load: Failed to read data at index %d\n", index);
                     return -1;
                 }
             }
         }
     }
 
+    DbgPrint("assoc_load: Successfully loaded assoc array\n");
     return 0;
 }
 
@@ -552,10 +587,12 @@ void assoc_register_mem(assoc_malloc_func* malloc_func, assoc_realloc_func* real
         internal_malloc = malloc_func;
         internal_realloc = realloc_func;
         internal_free = free_func;
+        DbgPrint("assoc_register_mem: Custom memory functions registered\n");
     } else {
         internal_malloc = default_malloc;
         internal_realloc = default_realloc;
         internal_free = default_free;
+        DbgPrint("assoc_register_mem: Default memory functions registered\n");
     }
 }
 

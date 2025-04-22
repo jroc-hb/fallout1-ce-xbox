@@ -5,15 +5,23 @@
 #include "plib/db/db.h"
 #include "plib/gnw/memory.h"
 
+#ifdef NXDK
+//debug logging
+#include <xboxkrnl/xboxkrnl.h>
+#endif
+
 namespace fallout {
 
 // 0x442E40
 int gmemory_init()
 {
+    DbgPrint("Entering assoc_register_mem\n");
     assoc_register_mem(mem_malloc, mem_realloc, mem_free);
+    DbgPrint("assoc_register_mem done\n");
     db_register_mem(mem_malloc, mem_strdup, mem_free);
+    DbgPrint("db_register_mem done\n");
     memoryRegisterAlloc(gmalloc, grealloc, gfree);
-
+    DbgPrint("gmemory_init done\n");
     return 0;
 }
 
