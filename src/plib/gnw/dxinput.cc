@@ -121,11 +121,54 @@ bool dxinput_flush_keyboard_buffer()
     return true;
 }
 
-// 0x4E0650
-bool dxinput_read_keyboard_buffer(KeyboardData* keyboardData)
+#ifdef NXDK
+// Add tracking of previous button states
+static bool previousButtonStates[SDL_CONTROLLER_BUTTON_MAX] = { false };
+
+// Define default button mappings
+const ControllerKeyMapping CONTROLLER_KEY_MAPPINGS[] = {
+    // Face buttons
+    { SDL_CONTROLLER_BUTTON_X, SDL_SCANCODE_I },         // Inventory (I)
+    { SDL_CONTROLLER_BUTTON_Y, SDL_SCANCODE_C },         // Character screen (C)
+    { SDL_CONTROLLER_BUTTON_BACK, SDL_SCANCODE_ESCAPE }, // Options menu (Esc)
+    { SDL_CONTROLLER_BUTTON_START, SDL_SCANCODE_P },     // Pip-Boy (P)
+    
+    // D-Pad
+    { SDL_CONTROLLER_BUTTON_DPAD_UP, SDL_SCANCODE_UP },     // Move up
+    { SDL_CONTROLLER_BUTTON_DPAD_DOWN, SDL_SCANCODE_DOWN }, // Move down
+    { SDL_CONTROLLER_BUTTON_DPAD_LEFT, SDL_SCANCODE_LEFT }, // Move left
+    { SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_SCANCODE_RIGHT} // Move right
+};
+
+const int CONTROLLER_KEY_MAPPING_COUNT = sizeof(CONTROLLER_KEY_MAPPINGS) / sizeof(CONTROLLER_KEY_MAPPINGS[0]);
+
+bool dxinput_read_keyboard_buffer(KeyboardData* keyboardData) 
 {
-    return true;
+    SDL_GameController* controller = SDL_GameControllerOpen(0);
+    if (controller == NULL) {
+        return false;
+    }
+
+    // Check all mapped buttons
+    for (int i = 0; i < CONTROLLER_KEY_MAPPING_COUNT; i++) {
+        const ControllerKeyMapping* mapping = &CONTROLLER_KEY_MAPPINGS[i];
+        bool currentState = SDL_GameControllerGetButton(controller, mapping->button) != 0;
+        
+        // Only trigger on state changes
+        if (currentState != previousButtonStates[mapping->button]) {
+            keyboardData->key = mapping->scancode;
+            keyboardData->down = currentState ? 1 : 0;
+            
+            // Store new state
+            previousButtonStates[mapping->button] = currentState;
+            
+            return true;
+        }
+    }
+
+    return false;
 }
+#endif
 
 // 0x4E070C
 bool dxinput_mouse_init()

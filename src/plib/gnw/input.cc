@@ -1086,6 +1086,16 @@ void GNW95_process_message()
     // it again.
 
     KeyboardData keyboardData;
+
+#ifdef NXDK
+    // Check controller buttons first before regular input processing
+    if (dxinput_read_keyboard_buffer(&keyboardData)) {
+        if (!kb_is_disabled()) {
+            GNW95_process_key(&keyboardData);
+        }
+    }
+#endif
+
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         switch (e.type) {

@@ -12,6 +12,15 @@ typedef struct ControllerState {
     bool buttonA;
     bool buttonB;
 } ControllerState;
+
+typedef struct ControllerKeyMapping {
+    SDL_GameControllerButton button;
+    SDL_Scancode scancode;
+} ControllerKeyMapping;
+
+// Default controller button to keyboard mappings
+extern const ControllerKeyMapping CONTROLLER_KEY_MAPPINGS[];
+extern const int CONTROLLER_KEY_MAPPING_COUNT;
 #endif
 
 typedef struct MouseData {
