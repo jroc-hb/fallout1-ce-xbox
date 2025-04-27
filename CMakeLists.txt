@@ -1,5 +1,5 @@
 set (XBE_TITLE fallout-ce)
-set (XBOX_ISO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/XISO)
+set (XBOX_ISO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/fallout-ce)
 
 cmake_minimum_required(VERSION 3.13)
 

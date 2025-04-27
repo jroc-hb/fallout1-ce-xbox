@@ -1245,7 +1245,10 @@ static int game_init_databases()
 
     if (config_get_value(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_HASHING_KEY, &hashing)) {
         DbgPrint("game_init_databases: Enabling hash table\n");
+        //NXDK: Enable this later and see if it works now that the fopen rt issue is solved
+        #ifndef NXDK
         db_enable_hash_table();
+        #endif
     }
 
     config_get_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_DAT_KEY, &main_file_name);

@@ -262,7 +262,6 @@ bool config_load(Config* config, const char* filePath, bool isDb)
     if (isDb) {
         DB_FILE* stream = db_fopen(filePath, "rb");
         if (stream != NULL) {
-            DbgPrint("config_load: stream was null! rb %s\n", filePath);
             while (db_fgets(string, sizeof(string), stream) != NULL) {
                 config_parse_line(config, string);
             }
@@ -271,7 +270,6 @@ bool config_load(Config* config, const char* filePath, bool isDb)
     } else {
         FILE* stream = compat_fopen(filePath, "rt");
         if (stream != NULL) {
-            DbgPrint("config_load: stream was null! rt %s\n", filePath);
             while (fgets(string, sizeof(string), stream) != NULL) {
                 config_parse_line(config, string);
             }
@@ -500,8 +498,23 @@ bool config_get_double(Config* config, const char* sectionKey, const char* key, 
     if (!config_get_string(config, sectionKey, key, &stringValue)) {
         return false;
     }
+    // NXDK: strtod freaks out if you hand it an empty string
+#ifdef NXDK
+    if (stringValue == NULL || stringValue[0] == '\0') {
+        return false;
+    }
 
+    char* end;
+    double val = strtod(stringValue, &end);
+
+    if (stringValue == end) {
+        return false;
+    }
+
+    *valuePtr = val;
+#else
     *valuePtr = strtod(stringValue, NULL);
+#endif
 
     return true;
 }

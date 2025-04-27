@@ -20,11 +20,10 @@ static HANDLE autorun_mutex;
 bool autorun_mutex_create()
 {
 #ifdef _WIN32
-    #ifdef NXDK
-    DbgPrint("Creating autorun mutex\n");
+    // NXDK: Needs casting
+#ifdef NXDK
     autorun_mutex = CreateMutexA((LPSECURITY_ATTRIBUTES)NULL, FALSE, "InterplayGenericAutorunMutex");
-    DbgPrint("Created autorun mutex\n");
-    #else
+#else
     autorun_mutex = CreateMutexA(NULL, FALSE, "InterplayGenericAutorunMutex");
     #endif
     if (GetLastError() == ERROR_ALREADY_EXISTS) {

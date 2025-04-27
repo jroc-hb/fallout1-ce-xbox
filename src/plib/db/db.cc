@@ -152,45 +152,34 @@ static DB_DATABASE* database_list[DB_DATABASE_LIST_CAPACITY];
 // 0x4AEE90
 DB_DATABASE* db_init(const char* datafile, const char* datafile_path, const char* patches_path, int show_cursor)
 {
-    DbgPrint("db_init: Starting initialization\n");
 
     DB_DATABASE* database;
 
     if (db_create_database(&database) != 0) {
-        DbgPrint("db_init: Failed to create database\n");
         return INVALID_DATABASE_HANDLE;
     }
-    DbgPrint("db_init: Database created successfully\n");
 
     if (db_init_database(database, datafile, datafile_path) != 0) {
-        DbgPrint("db_init: Failed to initialize database with datafile: %s, datafile_path: %s\n", datafile, datafile_path);
         db_close(database);
         return INVALID_DATABASE_HANDLE;
     }
-    DbgPrint("db_init: Database initialized successfully with datafile: %s, datafile_path: %s\n", datafile, datafile_path);
 
     if (db_init_patches(database, patches_path) != 0) {
-        DbgPrint("db_init: Failed to initialize patches with patches_path: %s\n", patches_path);
         db_close(database);
         return INVALID_DATABASE_HANDLE;
     }
-    DbgPrint("db_init: Patches initialized successfully with patches_path: %s\n", patches_path);
 
     if (current_database == NULL) {
         current_database = database;
-        DbgPrint("db_init: Current database set successfully\n");
     }
 
     if (hash_is_on) {
         if (db_init_hash_table(database) != 0) {
-            DbgPrint("db_init: Failed to initialize hash table\n");
             database->hash_table = NULL;
         } else {
-            DbgPrint("db_init: Hash table initialized successfully\n");
         }
     }
 
-    DbgPrint("db_init: Initialization completed successfully\n");
     return database;
 }
 
@@ -1025,9 +1014,42 @@ char* db_fgets(char* string, size_t size, DB_FILE* stream)
     int ch;
 
     if (stream != NULL) {
+        // NXDK: fgets behaves strange
+#if defined(NXDK)
+        if ((stream->flags & 0x4) != 0) {
+            // Use fread to simulate fgets behavior
+            if (string != NULL && size > 1) {
+                size_t bytesRead = fread(string, 1, size - 1, stream->uncompressed_file_stream);
+                if (bytesRead > 0) {
+                    for (index = 0; index < bytesRead; index++) {
+                        if (string[index] == '\n') {
+                            index++;
+                            break;
+                        }
+                    }
+
+                    // If newline was not found, adjust index
+                    if (index == bytesRead) {
+                        // Try to null-terminate
+                        index = bytesRead;
+                    }
+
+                    string[index] = '\0';
+                    res = string;
+
+                    // If we stopped early due to newline, reposition file pointer
+                    if (index < bytesRead) {
+                        fseek(stream->uncompressed_file_stream, (long)(index - bytesRead), SEEK_CUR);
+                    }
+                }
+            }
+        }
+#else
         if ((stream->flags & 0x4) != 0) {
             res = fgets(string, size, stream->uncompressed_file_stream);
-        } else {
+        }
+#endif
+        else {
             if (string != NULL) {
                 for (index = 0; index < size - 1; index++) {
                     ch = db_fgetc(stream);
@@ -1054,6 +1076,7 @@ char* db_fgets(char* string, size_t size, DB_FILE* stream)
 
     return res;
 }
+
 
 // 0x4B051C
 int db_fseek(DB_FILE* stream, long offset, int origin)
@@ -1598,7 +1621,6 @@ int db_feof(DB_FILE* stream)
 // 0x4B0EF0
 int db_get_file_list(const char* filespec, char*** filelist, char*** desclist, int desclen)
 {
-    DbgPrint("db_get_file_list(%s, %p, %p, %d)\n", filespec, filelist, desclist, desclen);
     bool v1;
     char path[COMPAT_MAX_PATH];
     char* sep;
@@ -1943,7 +1965,6 @@ static int db_destroy_database(DB_DATABASE** database_ptr)
 // 0x4B1BC4
 static int db_init_database(DB_DATABASE* database, const char* datafile, const char* datafile_path)
 {
-    DbgPrint("db_init_database: Starting initialization\n");
 
     assoc_func_list funcs;
     int index;
@@ -1951,31 +1972,26 @@ static int db_init_database(DB_DATABASE* database, const char* datafile, const c
     size_t v2;
 
     if (database == NULL) {
-        DbgPrint("db_init_database: Database is NULL\n");
         return -1;
     }
 
     if (datafile == NULL) {
-        DbgPrint("db_init_database: Datafile is NULL\n");
         return 0;
     }
 
     database->datafile = internal_strdup(datafile);
     if (database->datafile == NULL) {
-        DbgPrint("db_init_database: Failed to duplicate datafile string\n");
         return -1;
     }
 
     database->stream = compat_fopen(database->datafile, "rb");
     if (database->stream == NULL) {
-        DbgPrint("db_init_database: Failed to open datafile: %s\n", database->datafile);
         internal_free(database->datafile);
         database->datafile = NULL;
         return -1;
     }
 
     if (assoc_init(&(database->root), 0, sizeof(*database->entries), NULL) != 0) {
-        DbgPrint("db_init_database: Failed to initialize root association array\n");
         fclose(database->stream);
         internal_free(database->datafile);
         database->datafile = NULL;
@@ -1983,7 +1999,6 @@ static int db_init_database(DB_DATABASE* database, const char* datafile, const c
     }
 
     if (assoc_load(database->stream, &(database->root), 0) != 0) {
-        DbgPrint("db_init_database: Failed to load root association array\n");
         fclose(database->stream);
         internal_free(database->datafile);
         database->datafile = NULL;
@@ -1992,7 +2007,6 @@ static int db_init_database(DB_DATABASE* database, const char* datafile, const c
 
     database->entries = (assoc_array*)internal_malloc(sizeof(*database->entries) * database->root.size);
     if (database->entries == NULL) {
-        DbgPrint("db_init_database: Failed to allocate memory for entries\n");
         assoc_free(&(database->root));
         fclose(database->stream);
         internal_free(database->datafile);
@@ -2006,24 +2020,17 @@ static int db_init_database(DB_DATABASE* database, const char* datafile, const c
     funcs.saveFuncDB = NULL;
 
     for (index = 0; index < database->root.size; index++) {
-        DbgPrint("\n\ndb_init_database: Initializing entry at index %d\n", index);
         if (assoc_init(&(database->entries[index]), 0, sizeof(dir_entry), &funcs) != 0) {
-            DbgPrint("db_init_database: Failed to initialize entry at index %d\n", index);
             break;
         }
 
-        DbgPrint("db_init_database: Entry name at index %d: %s\n", index, &(database->entries[index]).list[0].name);
-        // Something gets fucked here and the size is huge
 
         if (assoc_load(database->stream, &(database->entries[index]), 0) != 0) {
-            DbgPrint("DEBUG %s %d\n", __FUNCTION__, __LINE__);
-            DbgPrint("db_init_database: Failed to load entry at index %d\n", index);
             break;
         }
     }
 
     if (index < database->root.size) {
-        DbgPrint("db_init_database: Cleaning up due to failure at index %d\n", index);
         while (--index >= 0) {
             assoc_free(&(database->entries[index]));
         }
@@ -2048,7 +2055,6 @@ static int db_init_database(DB_DATABASE* database, const char* datafile, const c
     v2 = strlen(v1);
     database->datafile_path = (char*)internal_malloc(v2 + 2);
     if (database->datafile_path == NULL) {
-        DbgPrint("db_init_database: Failed to allocate memory for datafile path\n");
         internal_free(database->entries);
         assoc_free(&(database->root));
         fclose(database->stream);
@@ -2064,7 +2070,6 @@ static int db_init_database(DB_DATABASE* database, const char* datafile, const c
         database->datafile_path[v2 + 1] = '\0';
     }
 
-    DbgPrint("db_init_database: Initialization completed successfully\n");
     return 0;
 }
 
@@ -2701,7 +2706,6 @@ static void* internal_malloc(size_t size)
 // 0x4B287C
 static char* internal_strdup(const char* string)
 {
-    DbgPrint("internal_strdup: string: %s\n", string);
     db_used_malloc = true;
     return db_strdup(string);
 }

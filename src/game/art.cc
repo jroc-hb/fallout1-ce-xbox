@@ -244,7 +244,7 @@ int art_init()
         }
 
         head_info[headIndex].neutralFidgetCount = atoi(sep2 + 1);
-        DbgPrint("THE FIRST PART THAT WAS MODIFIED...\n");
+        // NXDK: This part was modified from the original and may not work correctly
         sep4 = (char*)strpbrk(sep3 + 1, " ,;\t\n");
         if (sep4 != NULL) {
             *sep4 = '\0';
@@ -682,7 +682,7 @@ int art_read_lst(const char* path, char** artListPtr, int* artListSizePtr)
     }
 
     while (db_fgets(string, sizeof(string), stream)) {
-        DbgPrint("THE SECOND PART THAT WAS MODIFIED...\n");
+        // NXDK: This part was modified and may not be working correctly
         char* brk = (char*)strpbrk(string, " ,;\r\t\n");
         if (brk != NULL) {
             *brk = '\0';

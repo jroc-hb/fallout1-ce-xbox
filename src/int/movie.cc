@@ -974,6 +974,10 @@ void movieSetVolume(int volume)
 // 0x4799F0
 void movieUpdate()
 {
+    // NXDK: FMV disabled for now
+    #ifdef NXDK
+    return;
+    #endif
     if (!running) {
         return;
     }

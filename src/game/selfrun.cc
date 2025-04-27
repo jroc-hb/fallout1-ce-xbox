@@ -34,7 +34,6 @@ static int selfrun_state = SELFRUN_STATE_TURNED_OFF;
 // 0x496D60
 int selfrun_get_list(char*** fileListPtr, int* fileListLengthPtr)
 {
-    DbgPrint("selfrun_get_list\n");
     if (fileListPtr == NULL) {
         return -1;
     }

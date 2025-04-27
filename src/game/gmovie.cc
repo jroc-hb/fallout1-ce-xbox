@@ -101,6 +101,10 @@ int gmovie_save(DB_FILE* stream)
 // 0x44E690
 int gmovie_play(int game_movie, int game_movie_flags)
 {
+    // NXDK: Disable FMV for now
+    #ifdef NXDK
+    return 0;
+    #endif
     dir_entry de;
     char movieFilePath[COMPAT_MAX_PATH];
 

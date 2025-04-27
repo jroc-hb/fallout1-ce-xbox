@@ -13,6 +13,15 @@ static int gMouseWheelDeltaY = 0;
 // 0x4E0400
 bool dxinput_init()
 {
+    // NXDK: Basic controller support FIXME
+#ifdef NXDK
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    if (SDL_Init(SDL_INIT_GAMECONTROLLER) < 0) {
+        SDL_Log("SDL_Init: %s\n", SDL_GetError());
+        return false;
+    };
+#endif
+    
     if (SDL_InitSubSystem(SDL_INIT_EVENTS) != 0) {
         return false;
     }
@@ -103,7 +112,12 @@ bool dxinput_read_keyboard_buffer(KeyboardData* keyboardData)
 // 0x4E070C
 bool dxinput_mouse_init()
 {
+    // NXDK: Find out how to make the ACTUAL mouse work
+#ifdef NXDK
+    return true;
+#else
     return SDL_SetRelativeMouseMode(SDL_TRUE) == 0;
+#endif
 }
 
 // 0x4E078C

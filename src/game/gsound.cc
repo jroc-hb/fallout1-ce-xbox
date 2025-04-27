@@ -781,6 +781,10 @@ int gsound_background_play(const char* fileName, int a2, int a3, int a4)
 // 0x448338
 int gsound_background_play_level_music(const char* a1, int a2)
 {
+    // NXDK: Disabling audio for now
+    #ifdef NXDK
+    return 0;
+    #endif
     return gsound_background_play(a1, a2, 14, 16);
 }
 

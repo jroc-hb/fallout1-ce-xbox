@@ -40,7 +40,6 @@ char GNW95_title[256];
 
 int main(int argc, char* argv[])
 {
-    DbgPrint("int main\n");
     int rc;
 
 #if _WIN32
@@ -84,7 +83,9 @@ int main(int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {
+    #ifdef NXDK
     DbgPrint("\n\n\n##################### Starting Fallout #####################\n");
+    // NXDK: CMake doesn't automount the D: drive, so we need to do it manually
     if (!nxIsDriveMounted('D')) {
         DbgPrint("Mounting D because it is not mounted\n");
         // D: doesn't exist yet, so we create it
@@ -100,18 +101,10 @@ int main(int argc, char* argv[])
         // Mount the obtained path as D:
         BOOL success;
         success = nxMountDrive('D', targetPath);
-        DbgPrint("targetPath: %s\n", targetPath);
         DbgPrint("Mounted D: %s\n", success ? "success" : "failed");
         assert(success);
-        // Check if master.dat exists in the root of D
-        FILE* file = fopen("D:\\master.dat", "r");
-        if (file != NULL) {
-            DbgPrint("master.dat exists in the root of D:\\\n");
-            fclose(file);
-        } else {
-            DbgPrint("master.dat does not exist in the root of D:\\\n");
-        }
     }
+    #endif
 
     return fallout::main(argc, argv);
 }
