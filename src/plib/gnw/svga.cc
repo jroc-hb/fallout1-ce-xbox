@@ -87,40 +87,40 @@ void GNW95_ShowRect(unsigned char* src, unsigned int srcPitch, unsigned int a3, 
 
 bool svga_init(VideoOptions* video_options)
 {
-    // #ifdef NXDK
-    // Sleep(1000);
-    // // Based on LithiumX solution to detect Xbox resolution: https://github.com/Ryzee119/LithiumX/blob/f4471d287d44abc84803d3b901bd4aa7ed459689/src/platform/xbox/platform.c#L99
-    // // First try 720p. This is the preferred resolution
-    // int SCREEN_WIDTH = 1280;
-    // int SCREEN_HEIGHT = 720;
-    // if (XVideoSetMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, REFRESH_DEFAULT) == false)
-    // {
-    //     // Fall back to 640*480
-    //     SCREEN_WIDTH = 640;
-    //     SCREEN_HEIGHT = 480;
-    //     if (XVideoSetMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, REFRESH_DEFAULT) == false)
-    //     {
-    //         // Try whatever else the xbox is happy with
-    //         VIDEO_MODE xmode;
-    //         void *p = NULL;
-    //         while (XVideoListModes(&xmode, 0, 0, &p))
-    //         {
-    //             if (xmode.width == 1080)
-    //                 continue;
-    //             if (xmode.width == 720)
-    //                 continue; // 720x480 doesnt work on pbkit for some reason
-    //             XVideoSetMode(xmode.width, xmode.height, xmode.bpp, xmode.refresh);
-    //             ;
-    //             break;
-    //         }
+    #ifdef NXDK
+    Sleep(1000);
+    // Based on LithiumX solution to detect Xbox resolution: https://github.com/Ryzee119/LithiumX/blob/f4471d287d44abc84803d3b901bd4aa7ed459689/src/platform/xbox/platform.c#L99
+    // First try 720p. This is the preferred resolution
+    int SCREEN_WIDTH = 640;
+    int SCREEN_HEIGHT = 480;
+    if (XVideoSetMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, REFRESH_DEFAULT) == false)
+    {
+        // Fall back to 640*480
+        SCREEN_WIDTH = 640;
+        SCREEN_HEIGHT = 480;
+        if (XVideoSetMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, REFRESH_DEFAULT) == false)
+        {
+            // Try whatever else the xbox is happy with
+            VIDEO_MODE xmode;
+            void *p = NULL;
+            while (XVideoListModes(&xmode, 0, 0, &p))
+            {
+                if (xmode.width == 1080)
+                    continue;
+                if (xmode.width == 720)
+                    continue; // 720x480 doesnt work on pbkit for some reason
+                XVideoSetMode(xmode.width, xmode.height, xmode.bpp, xmode.refresh);
+                ;
+                break;
+            }
 
-    //         SCREEN_WIDTH = xmode.width;
-    //         SCREEN_HEIGHT = xmode.height;
-    //     }
-    // }
-    // #endif
-
-    XVideoSetMode(640, 480, 32, REFRESH_DEFAULT);
+            SCREEN_WIDTH = xmode.width;
+            SCREEN_HEIGHT = xmode.height;
+        }
+    }
+    video_options->width = SCREEN_WIDTH;
+    video_options->height = SCREEN_HEIGHT;
+    #endif
 
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
 
@@ -141,14 +141,14 @@ bool svga_init(VideoOptions* video_options)
     #endif
 
     gSdlWindow = SDL_CreateWindow(GNW95_title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-        640 * video_options->scale,
-        480 * video_options->scale,
+        video_options->width * video_options->scale,
+        video_options->height * video_options->scale,
         windowFlags);
     if (gSdlWindow == NULL) {
         return false;
     }
 
-    if (!createRenderer(640, 480)) {
+    if (!createRenderer(video_options->width, video_options->height)) {
         destroyRenderer();
 
         SDL_DestroyWindow(gSdlWindow);
@@ -158,8 +158,8 @@ bool svga_init(VideoOptions* video_options)
     }
 
     gSdlSurface = SDL_CreateRGBSurface(0,
-        640,
-        480,
+        video_options->width,
+        video_options->height,
         8,
         0,
         0,
@@ -184,8 +184,8 @@ bool svga_init(VideoOptions* video_options)
 
     scr_size.ulx = 0;
     scr_size.uly = 0;
-    scr_size.lrx = 640 - 1;
-    scr_size.lry = 480 - 1;
+    scr_size.lrx = video_options->width - 1;
+    scr_size.lry = video_options->height - 1;
 
     mouse_blit_trans = NULL;
     scr_blit = GNW95_ShowRect;
@@ -229,7 +229,11 @@ static bool createRenderer(int width, int height)
         return false;
     }
 
+#ifdef NXDK
+    gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STREAMING, width, height);
+#else
     gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, width, height);
+#endif
     if (gSdlTexture == NULL) {
         return false;
     }
