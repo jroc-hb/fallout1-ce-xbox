@@ -64,6 +64,23 @@ bool dxinput_unacquire_mouse()
 // 0x4E053C
 bool dxinput_get_mouse_state(MouseData* mouseState)
 {
+#ifdef NXDK
+    // Handle both real mouse and controller input
+    ControllerState controllerState;
+    if (dxinput_get_controller_state(&controllerState)) {
+        // Convert analog input to mouse movement
+        // Scale the movement - adjust these values to taste
+        const float sensitivity = 15.0f;
+        mouseState->x = (int)(controllerState.analogX * sensitivity);
+        mouseState->y = (int)(controllerState.analogY * sensitivity);
+        mouseState->buttons[0] = controllerState.buttonA;
+        mouseState->buttons[1] = controllerState.buttonB;
+        mouseState->wheelX = 0;
+        mouseState->wheelY = 0;
+        return true;
+    }
+    return false;
+#else
     // CE: This function is sometimes called outside loops calling `get_input`
     // and subsequently `GNW95_process_message`, so mouse events might not be
     // handled by SDL yet.
@@ -82,6 +99,7 @@ bool dxinput_get_mouse_state(MouseData* mouseState)
     gMouseWheelDeltaY = 0;
 
     return true;
+#endif
 }
 
 // 0x4E05A8
@@ -146,5 +164,31 @@ void handleMouseEvent(SDL_Event* event)
         gMouseWheelDeltaY += event->wheel.y;
     }
 }
+
+#ifdef NXDK
+bool dxinput_get_controller_state(ControllerState* state)
+{
+    SDL_GameController* controller = SDL_GameControllerOpen(0);
+    if (controller == NULL) {
+        return false;
+    }
+
+    // Get analog stick values and normalize them to -1.0 to 1.0
+    float axisX = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX) / 32767.0f;
+    float axisY = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY) / 32767.0f;
+
+    // Apply deadzone of 0.2
+    const float deadzone = 0.2f;
+    if (fabs(axisX) < deadzone) axisX = 0;
+    if (fabs(axisY) < deadzone) axisY = 0;
+
+    state->analogX = axisX;
+    state->analogY = axisY;
+    state->buttonA = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_A) != 0;
+    state->buttonB = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_B) != 0;
+
+    return true;
+}
+#endif
 
 } // namespace fallout

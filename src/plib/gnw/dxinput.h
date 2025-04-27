@@ -5,6 +5,15 @@
 
 namespace fallout {
 
+#ifdef NXDK
+typedef struct ControllerState {
+    float analogX;
+    float analogY;
+    bool buttonA;
+    bool buttonB;
+} ControllerState;
+#endif
+
 typedef struct MouseData {
     int x;
     int y;
@@ -29,6 +38,10 @@ bool dxinput_flush_keyboard_buffer();
 bool dxinput_read_keyboard_buffer(KeyboardData* keyboardData);
 
 void handleMouseEvent(SDL_Event* event);
+
+#ifdef NXDK
+bool dxinput_get_controller_state(ControllerState* state);
+#endif
 
 } // namespace fallout
 
