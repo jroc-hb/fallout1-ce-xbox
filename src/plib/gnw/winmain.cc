@@ -85,6 +85,8 @@ int main(int argc, char* argv[])
 {
 #ifdef NXDK
     DbgPrint("\n\n\n##################### Starting Fallout #####################\n");
+    BOOL success;
+
     // NXDK: CMake doesn't automount the D: drive, so we need to do it manually
     if (!nxIsDriveMounted('D')) {
         DbgPrint("Mounting D because it is not mounted\n");
@@ -99,23 +101,110 @@ int main(int argc, char* argv[])
         *(filenameStr + 1) = '\0';
 
         // Mount the obtained path as D:
-        BOOL success;
         success = nxMountDrive('D', targetPath);
         DbgPrint("Mounted D: %s\n", success ? "success" : "failed");
         assert(success);
     }
-    // NXDK TODO: Make this work properly from disc and save in E drive
-    // success = nxMountDrive('E', "\\Device\\Harddisk0\\Partition1\\");
-    // DbgPrint("Mounted E: %s\n", success ? "success" : "failed");
-    // assert(success);
-    // CreateDirectoryA("E:\\UDATA", NULL);
-    // CreateDirectoryA("E:\\UDATA\\FALLOUT1", NULL);
-    // CreateDirectoryA("E:\\UDATA\\FALLOUT1\\data", NULL);
 
-    // Install fallout.cfg to HDD
-    // if (GetFileAttributesA("E:\\UDATA\\FALLOUT1\\fallout.cfg") == INVALID_FILE_ATTRIBUTES) {
-    //     CopyFileA("D:\\fallout.cfg", "E:\\UDATA\\FALLOUT1\\fallout.cfg", FALSE);
-    // }
+    // NXDK: Mount the E: drive for writable data
+    success = nxMountDrive('E', "\\Device\\Harddisk0\\Partition1\\");
+    DbgPrint("Mounted E: %s\n", success ? "success" : "failed");
+    assert(success);
+
+    BOOL dirSuccess;
+
+    DbgPrint("Creating directory E:\\UDATA\n");
+    dirSuccess = CreateDirectoryA("E:\\UDATA", NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
+    DbgPrint("CreateDirectoryA E:\\UDATA: %s\n", dirSuccess ? "success" : "failed");
+    assert(dirSuccess);
+
+    DbgPrint("Creating directory E:\\UDATA\\FALLOUT1\n");
+    dirSuccess = CreateDirectoryA("E:\\UDATA\\FALLOUT1", NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
+    DbgPrint("CreateDirectoryA E:\\UDATA\\FALLOUT1: %s\n", dirSuccess ? "success" : "failed");
+    assert(dirSuccess);
+
+    DbgPrint("Creating directory E:\\UDATA\\FALLOUT1\\data\n");
+    dirSuccess = CreateDirectoryA("E:\\UDATA\\FALLOUT1\\data", NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
+    DbgPrint("CreateDirectoryA E:\\UDATA\\FALLOUT1\\data: %s\n", dirSuccess ? "success" : "failed");
+    assert(dirSuccess);
+
+    // Install fallout.cfg and f1_res.ini to HDD
+    if (GetFileAttributesA("E:\\UDATA\\FALLOUT1\\fallout.cfg") == INVALID_FILE_ATTRIBUTES) {
+        DbgPrint("Copying fallout.cfg to E:\\UDATA\\FALLOUT1\\fallout.cfg\n");
+        BOOL copySuccess = CopyFileA("D:\\fallout.cfg", "E:\\UDATA\\FALLOUT1\\fallout.cfg", FALSE);
+        DbgPrint("CopyFileA fallout.cfg: %s\n", copySuccess ? "success" : "failed");
+        assert(copySuccess);
+    }
+    if (GetFileAttributesA("E:\\UDATA\\FALLOUT1\\f1_res.ini") == INVALID_FILE_ATTRIBUTES) {
+        DbgPrint("Copying f1_res.ini to E:\\UDATA\\FALLOUT1\\f1_res.ini\n");
+        BOOL copySuccess = CopyFileA("D:\\f1_res.ini", "E:\\UDATA\\FALLOUT1\\f1_res.ini", FALSE);
+        DbgPrint("CopyFileA f1_res.ini: %s\n", copySuccess ? "success" : "failed");
+        assert(copySuccess);
+    }
+
+    // Install DATA/TEXT files to HDD (Should work for all languages)
+    auto CopyDirectoryRecursive = [](const char* srcDir, const char* dstDir, auto& self) -> void {
+        WIN32_FIND_DATAA findData;
+        char searchPath[MAX_PATH];
+        snprintf(searchPath, MAX_PATH, "%s\\*", srcDir);
+
+        HANDLE hFind = FindFirstFileA(searchPath, &findData);
+        if (hFind == INVALID_HANDLE_VALUE) {
+            DbgPrint("FindFirstFileA failed for %s\n", srcDir);
+            return;
+        }
+
+        do {
+            if (strcmp(findData.cFileName, ".") == 0 || strcmp(findData.cFileName, "..") == 0) {
+                continue;
+            }
+
+            char srcPath[MAX_PATH];
+            char dstPath[MAX_PATH];
+            snprintf(srcPath, MAX_PATH, "%s\\%s", srcDir, findData.cFileName);
+            snprintf(dstPath, MAX_PATH, "%s\\%s", dstDir, findData.cFileName);
+
+            if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                DbgPrint("Creating directory: %s\n", dstPath);
+                BOOL dirSuccess = CreateDirectoryA(dstPath, NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
+                DbgPrint("CreateDirectoryA %s: %s\n", dstPath, dirSuccess ? "success" : "failed");
+                if (dirSuccess) {
+                    self(srcPath, dstPath, self);
+                }
+            } else {
+                DbgPrint("Copying file: %s -> %s\n", srcPath, dstPath);
+                BOOL copySuccess = CopyFileA(srcPath, dstPath, FALSE);
+                DbgPrint("CopyFileA %s: %s\n", dstPath, copySuccess ? "success" : "failed");
+            }
+        } while (FindNextFileA(hFind, &findData));
+        FindClose(hFind);
+    };
+
+    // Check if E:\UDATA\FALLOUT1\DATA\TEXT exists
+    if (GetFileAttributesA("E:\\UDATA\\FALLOUT1\\DATA\\TEXT") == INVALID_FILE_ATTRIBUTES) {
+        DbgPrint("E:\\UDATA\\FALLOUT1\\DATA\\TEXT does not exist, creating...\n");
+
+        // Create E:\UDATA\FALLOUT1\DATA if needed
+        if (GetFileAttributesA("E:\\UDATA\\FALLOUT1\\DATA") == INVALID_FILE_ATTRIBUTES) {
+            DbgPrint("Creating directory E:\\UDATA\\FALLOUT1\\DATA\n");
+            BOOL dirSuccess = CreateDirectoryA("E:\\UDATA\\FALLOUT1\\DATA", NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
+            DbgPrint("CreateDirectoryA E:\\UDATA\\FALLOUT1\\DATA: %s\n", dirSuccess ? "success" : "failed");
+            assert(dirSuccess);
+        }
+
+        // Create E:\UDATA\FALLOUT1\DATA\TEXT
+        DbgPrint("Creating directory E:\\UDATA\\FALLOUT1\\DATA\\TEXT\n");
+        BOOL dirSuccess = CreateDirectoryA("E:\\UDATA\\FALLOUT1\\DATA\\TEXT", NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
+        DbgPrint("CreateDirectoryA E:\\UDATA\\FALLOUT1\\DATA\\TEXT: %s\n", dirSuccess ? "success" : "failed");
+        assert(dirSuccess);
+
+        // Recursively copy D:\DATA\TEXT to E:\UDATA\FALLOUT1\DATA\TEXT
+        DbgPrint("Recursively copying D:\\DATA\\TEXT to E:\\UDATA\\FALLOUT1\\DATA\\TEXT\n");
+        CopyDirectoryRecursive("D:\\DATA\\TEXT", "E:\\UDATA\\FALLOUT1\\DATA\\TEXT", CopyDirectoryRecursive);
+        DbgPrint("Finished copying D:\\DATA\\TEXT\n");
+    } else {
+        DbgPrint("E:\\UDATA\\FALLOUT1\\DATA\\TEXT already exists, skipping copy.\n");
+    }
 #endif
 
     return fallout::main(argc, argv);

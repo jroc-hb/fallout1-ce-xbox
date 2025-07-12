@@ -342,18 +342,6 @@ int compat_rename(const char* oldFileName, const char* newFileName)
 
 void compat_windows_path_to_native(char* path)
 {
-#ifdef NXDK
-    // DbgPrint("compat_windows_path_to_native BEFORE: %s\n", path);
-    if (strncmp(path, "D:\\", 3) != 0) {
-        char temp[COMPAT_MAX_PATH];
-        strncpy(temp, path, COMPAT_MAX_PATH - 1);
-        temp[COMPAT_MAX_PATH - 1] = '\0';
-        strcpy(path, "D:\\");
-        strncat(path, temp, COMPAT_MAX_PATH - strlen(path) - 1);
-    }
-    // DbgPrint("compat_windows_path_to_native AFTER: %s\n", path);
-#endif
-
 #ifndef _WIN32
     char* pch = path;
     while (*pch != '\0') {

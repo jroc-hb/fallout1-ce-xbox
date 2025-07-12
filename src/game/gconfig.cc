@@ -127,7 +127,7 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
     // Make `fallout.cfg` file path.
 
 #ifdef NXDK
-    snprintf(gconfig_file_name, sizeof(gconfig_file_name), "%s", GAME_CONFIG_FILE_NAME);
+    snprintf(gconfig_file_name, sizeof(gconfig_file_name), "%s", "E:\\UDATA\\FALLOUT1\\fallout.cfg");
 #else
     sep = strrchr(argv[0], '\\');
     if (sep != NULL) {
@@ -145,7 +145,7 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
 
     // Add key-values from command line, which overrides both defaults and
     // whatever was loaded from `fallout.cfg`.
-#ifndef NXDK
+#ifndef NXDK // Not very applicable for Xbox
     config_cmd_line_parse(&game_config, argc, argv);
 #endif
 

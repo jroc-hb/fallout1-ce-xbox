@@ -162,15 +162,21 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
     Config resolutionConfig;
     if (config_init(&resolutionConfig)) {
-        if (config_load(&resolutionConfig, "f1_res.ini", false)) {
+#ifdef NXDK // NXDK TODO: Find a nicer way to handle this
+        if (config_load(&resolutionConfig, "E:\\UDATA\\FALLOUT1\\f1_res.ini", false)) {
+#else
+        if (config_load(&resolutionConfig, "f1_res_path", false)) {
+#endif
             int screenWidth;
             if (config_get_value(&resolutionConfig, "MAIN", "SCR_WIDTH", &screenWidth)) {
                 video_options.width = std::max(screenWidth, 640);
+                DbgPrint("video_options.width = %i\n", video_options.width);
             }
 
             int screenHeight;
             if (config_get_value(&resolutionConfig, "MAIN", "SCR_HEIGHT", &screenHeight)) {
                 video_options.height = std::max(screenHeight, 480);
+                DbgPrint("video_options.height = %i\n", video_options.height);
             }
 
             bool windowed;
@@ -180,6 +186,7 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
             int scaleValue;
             if (config_get_value(&resolutionConfig, "MAIN", "SCALE_2X", &scaleValue)) {
+                DbgPrint("video_options.scale = %i\n", scaleValue + 1);
                 video_options.scale = scaleValue + 1;
                 video_options.width /= video_options.scale;
                 video_options.height /= video_options.scale;
