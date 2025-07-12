@@ -392,6 +392,7 @@ FodyWeavers.xsd
 # CMake
 /out
 /build
+/build-hwa
 
 # Xbox NXDK
 fallout-ce

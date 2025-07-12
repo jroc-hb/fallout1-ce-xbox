@@ -191,10 +191,25 @@ void compat_makepath(char* path, const char* drive, const char* dir, const char*
 
 int compat_open(const char* filePath, int flags)
 {
-    DbgPrint("compat_open: %s\n", filePath);
+#ifdef NXDK
+    char nativePath[COMPAT_MAX_PATH];
+    strcat(nativePath, filePath);
+    compat_windows_path_to_native(nativePath);
+    const char* mode = (flags & O_WRONLY) ? "wb" : "rb";
+    FILE* fp = fopen(nativePath, mode);
+
+    // NXDK seemingly doesn't support "rt" mode, so we use "rb" instead
+    if (strcmp(mode, "rt") == 0) {
+        FILE* fp = fopen(nativePath, "rb");
+    } else {
+        FILE* fp = fopen(nativePath, mode);
+    }
+    return fp ? reinterpret_cast<intptr_t>(fp) : -1;
+#else
     const char* mode = (flags & O_WRONLY) ? "wb" : "rb";
     FILE* fp = fopen(filePath, mode);
     return fp ? reinterpret_cast<intptr_t>(fp) : -1;
+#endif
 }
 
 int compat_close(int fileHandle)
@@ -243,7 +258,6 @@ long compat_filelength(int fileHandle)
 
 int compat_mkdir(const char* path)
 {
-    DbgPrint("compat_mkdir: %s\n", path);
     char nativePath[COMPAT_MAX_PATH];
     strcpy(nativePath, path);
     compat_windows_path_to_native(nativePath);
@@ -251,6 +265,7 @@ int compat_mkdir(const char* path)
 
 #ifdef _WIN32
     #ifdef NXDK
+    DbgPrint("compat_mkdir: %s\n", nativePath);
     return CreateDirectoryA(nativePath, NULL);
     #else
     return mkdir(nativePath);
@@ -278,10 +293,13 @@ FILE* compat_fopen(const char* path, const char* mode)
 {
     char nativePath[COMPAT_MAX_PATH];
 #ifdef NXDK
-    strcpy(nativePath, "D:\\");
-    strcat(nativePath, path);
+    strcpy(nativePath, path);
     compat_windows_path_to_native(nativePath);
-    DbgPrint("compat_fopen: %s\n", nativePath);
+    // if (mode && (mode[0] == 'w' || mode[0] == 'a')) {
+    //     DbgPrint("compat_fopen: creating/writing file: %s (mode: %s)\n", nativePath, mode);
+    // } else {
+    //     DbgPrint("compat_fopen: opening file: %s (mode: %s)\n", nativePath, mode);
+    // }
     if (strcmp(mode, "rt") == 0) {
         // NXDK seemingly doesn't support "rt" mode, so we use "rb" instead
         return fopen(nativePath, "rb");
@@ -298,7 +316,7 @@ FILE* compat_fopen(const char* path, const char* mode)
 
 int compat_remove(const char* path)
 {
-    DbgPrint("##compat_remove: %s\n", path);
+    DbgPrint("compat_remove: %s\n", path);
     char nativePath[COMPAT_MAX_PATH];
     strcpy(nativePath, path);
     compat_windows_path_to_native(nativePath);
@@ -308,14 +326,14 @@ int compat_remove(const char* path)
 
 int compat_rename(const char* oldFileName, const char* newFileName)
 {
-    DbgPrint("##compat_rename: %s\n", oldFileName);
+    DbgPrint("compat_rename: %s to %s\n", oldFileName, newFileName);
     char nativeOldFileName[COMPAT_MAX_PATH];
+    char nativeNewFileName[COMPAT_MAX_PATH];
+
     strcpy(nativeOldFileName, oldFileName);
+    strcpy(nativeNewFileName, newFileName);
     compat_windows_path_to_native(nativeOldFileName);
     compat_resolve_path(nativeOldFileName);
-
-    char nativeNewFileName[COMPAT_MAX_PATH];
-    strcpy(nativeNewFileName, newFileName);
     compat_windows_path_to_native(nativeNewFileName);
     compat_resolve_path(nativeNewFileName);
 
@@ -324,15 +342,27 @@ int compat_rename(const char* oldFileName, const char* newFileName)
 
 void compat_windows_path_to_native(char* path)
 {
-    #ifndef _WIN32
-        char* pch = path;
-        while (*pch != '\0') {
-            if (*pch == '\\') {
-                *pch = '/';
-            }
-            pch++;
+#ifdef NXDK
+    // DbgPrint("compat_windows_path_to_native BEFORE: %s\n", path);
+    if (strncmp(path, "D:\\", 3) != 0) {
+        char temp[COMPAT_MAX_PATH];
+        strncpy(temp, path, COMPAT_MAX_PATH - 1);
+        temp[COMPAT_MAX_PATH - 1] = '\0';
+        strcpy(path, "D:\\");
+        strncat(path, temp, COMPAT_MAX_PATH - strlen(path) - 1);
+    }
+    // DbgPrint("compat_windows_path_to_native AFTER: %s\n", path);
+#endif
+
+#ifndef _WIN32
+    char* pch = path;
+    while (*pch != '\0') {
+        if (*pch == '\\') {
+            *pch = '/';
         }
-    #endif
+        pch++;
+    }
+#endif
 }
 
 void compat_resolve_path(char* path)

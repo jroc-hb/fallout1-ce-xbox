@@ -83,7 +83,7 @@ int main(int argc, char* argv[])
 
 int main(int argc, char* argv[])
 {
-    #ifdef NXDK
+#ifdef NXDK
     DbgPrint("\n\n\n##################### Starting Fallout #####################\n");
     // NXDK: CMake doesn't automount the D: drive, so we need to do it manually
     if (!nxIsDriveMounted('D')) {
@@ -104,7 +104,19 @@ int main(int argc, char* argv[])
         DbgPrint("Mounted D: %s\n", success ? "success" : "failed");
         assert(success);
     }
-    #endif
+    // NXDK TODO: Make this work properly from disc and save in E drive
+    // success = nxMountDrive('E', "\\Device\\Harddisk0\\Partition1\\");
+    // DbgPrint("Mounted E: %s\n", success ? "success" : "failed");
+    // assert(success);
+    // CreateDirectoryA("E:\\UDATA", NULL);
+    // CreateDirectoryA("E:\\UDATA\\FALLOUT1", NULL);
+    // CreateDirectoryA("E:\\UDATA\\FALLOUT1\\data", NULL);
+
+    // Install fallout.cfg to HDD
+    // if (GetFileAttributesA("E:\\UDATA\\FALLOUT1\\fallout.cfg") == INVALID_FILE_ATTRIBUTES) {
+    //     CopyFileA("D:\\fallout.cfg", "E:\\UDATA\\FALLOUT1\\fallout.cfg", FALSE);
+    // }
+#endif
 
     return fallout::main(argc, argv);
 }

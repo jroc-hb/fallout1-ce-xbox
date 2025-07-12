@@ -1673,10 +1673,19 @@ static void GetTimeDate(short* day, short* month, short* year, int* hour)
     now = time(NULL);
     local = localtime(&now);
 
-    *day = local->tm_mday;
-    *month = local->tm_mon + 1;
-    *year = local->tm_year + 1900;
-    *hour = local->tm_hour + local->tm_min;
+    // NXDK: Returns null in XEMU, perhaps system clock or emulator
+    if (local == NULL) {
+        debug_printf("%s %d\n", __FUNCTION__, __LINE__);
+        *day = 10;
+        *month = 10;
+        *year = 1997;
+        *hour = 0;
+    } else {
+        *day = local->tm_mday;
+        *month = local->tm_mon + 1;
+        *year = local->tm_year + 1900;
+        *hour = local->tm_hour + local->tm_min;
+    }
 }
 
 // 0x46FF80
@@ -2583,6 +2592,15 @@ void KillOldMaps()
 // 0x471C68
 int MapDirErase(const char* relativePath, const char* extension)
 {
+#ifdef NXDK
+    // Seemingly due to a bug in the original code where patches is not always initialized before MapDirErase is called
+    if (patches == NULL) {
+        if (!config_get_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_MASTER_PATCHES_KEY, &patches)) {
+            debug_printf("\nLOADSAVE: Error reading patches config variable! Using default.\n");
+            patches = emgpath;
+        }
+    }
+#endif
     char path[COMPAT_MAX_PATH];
     snprintf(path, sizeof(path), "%s*.%s", relativePath, extension);
 

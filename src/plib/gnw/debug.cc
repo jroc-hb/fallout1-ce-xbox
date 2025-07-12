@@ -11,6 +11,10 @@
 #include "plib/gnw/intrface.h"
 #include "plib/gnw/memory.h"
 
+#ifdef NXDK
+#include <xboxkrnl/xboxkrnl.h>
+#endif
+
 namespace fallout {
 
 static int debug_mono(char* string);
@@ -137,6 +141,13 @@ int debug_printf(const char* format, ...)
 
     int rc;
 
+#ifdef NXDK
+        //debug logging in xemu
+        char string[260];
+        vsnprintf(string, sizeof(string), format, args);
+
+        rc = DbgPrint(string);
+#else
     if (debug_func != NULL) {
         char string[260];
         vsnprintf(string, sizeof(string), format, args);
@@ -148,6 +159,7 @@ int debug_printf(const char* format, ...)
 #endif
         rc = -1;
     }
+#endif
 
     va_end(args);
 

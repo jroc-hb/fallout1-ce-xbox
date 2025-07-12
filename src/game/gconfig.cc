@@ -126,9 +126,9 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
 
     // Make `fallout.cfg` file path.
 
-    #ifdef NXDK
+#ifdef NXDK
     snprintf(gconfig_file_name, sizeof(gconfig_file_name), "%s", GAME_CONFIG_FILE_NAME);
-    #else
+#else
     sep = strrchr(argv[0], '\\');
     if (sep != NULL) {
         *sep = '\0';
@@ -137,7 +137,7 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
     } else {
         strcpy(gconfig_file_name, GAME_CONFIG_FILE_NAME);
     }
-    #endif
+#endif
 
     // Read contents of `fallout.cfg` into config. The values from the file
     // will override the defaults above.
@@ -145,7 +145,9 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
 
     // Add key-values from command line, which overrides both defaults and
     // whatever was loaded from `fallout.cfg`.
+#ifndef NXDK
     config_cmd_line_parse(&game_config, argc, argv);
+#endif
 
     gconfig_initialized = true;
 

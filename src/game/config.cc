@@ -8,11 +8,7 @@
 #include "platform_compat.h"
 #include "plib/db/db.h"
 #include "plib/gnw/memory.h"
-
-#ifdef NXDK
-//debug logging
-#include <xboxkrnl/xboxkrnl.h>
-#endif
+#include "plib/gnw/debug.h"
 
 namespace fallout {
 
@@ -275,6 +271,8 @@ bool config_load(Config* config, const char* filePath, bool isDb)
             }
 
             fclose(stream);
+        } else {
+            return false; // NXDK FIXME
         }
 
         // FIXME: This function returns `true` even if the file was not actually
@@ -498,20 +496,51 @@ bool config_get_double(Config* config, const char* sectionKey, const char* key, 
     if (!config_get_string(config, sectionKey, key, &stringValue)) {
         return false;
     }
-    // NXDK: strtod freaks out if you hand it an empty string
+
+    // NXDK: strtod seemingly crashes for no reason so we roll our own strtod implementation
 #ifdef NXDK
     if (stringValue == NULL || stringValue[0] == '\0') {
         return false;
     }
 
-    char* end;
-    double val = strtod(stringValue, &end);
+    double result = 0.0;
+    bool isNegative = false;
+    const char* p = stringValue;
 
-    if (stringValue == end) {
+    // Skip whitespace
+    while (*p == ' ' || *p == '\t') p++;
+
+    // Handle sign
+    if (*p == '-') {
+        isNegative = true;
+        p++;
+    } else if (*p == '+') {
+        p++;
+    }
+
+    // Parse integer part
+    while (*p >= '0' && *p <= '9') {
+        result = result * 10.0 + (*p - '0');
+        p++;
+    }
+
+    // Parse decimal part
+    if (*p == '.') {
+        p++;
+        double fraction = 0.1;
+        while (*p >= '0' && *p <= '9') {
+            result += (*p - '0') * fraction;
+            fraction *= 0.1;
+            p++;
+        }
+    }
+
+    // Handle no valid digits
+    if (p == stringValue) {
         return false;
     }
 
-    *valuePtr = val;
+    *valuePtr = isNegative ? -result : result;
 #else
     *valuePtr = strtod(stringValue, NULL);
 #endif
