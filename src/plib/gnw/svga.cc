@@ -87,40 +87,21 @@ void GNW95_ShowRect(unsigned char* src, unsigned int srcPitch, unsigned int a3, 
 
 bool svga_init(VideoOptions* video_options)
 {
-    #ifdef NXDK
+#ifdef NXDK
     Sleep(1000);
-    // Based on LithiumX solution to detect Xbox resolution: https://github.com/Ryzee119/LithiumX/blob/f4471d287d44abc84803d3b901bd4aa7ed459689/src/platform/xbox/platform.c#L99
-    // First try 720p. This is the preferred resolution
-    int SCREEN_WIDTH = 640;
-    int SCREEN_HEIGHT = 480;
-    if (XVideoSetMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, REFRESH_DEFAULT) == false)
+    // Based on LithiumX solution to detect Xbox resolution: 
+    // https://github.com/Ryzee119/LithiumX/blob/f4471d287d44abc84803d3b901bd4aa7ed459689/src/platform/xbox/platform.c#L99
+    // First try the user-specified resolution in f1_res.ini, then fall back to 480p
+    if (XVideoSetMode(video_options->width, video_options->height, 32, REFRESH_DEFAULT) == false)
     {
         // Fall back to 640*480
-        SCREEN_WIDTH = 640;
-        SCREEN_HEIGHT = 480;
-        if (XVideoSetMode(SCREEN_WIDTH, SCREEN_HEIGHT, 32, REFRESH_DEFAULT) == false)
+        if (XVideoSetMode(640, 480, 32, REFRESH_DEFAULT))
         {
-            // Try whatever else the xbox is happy with
-            VIDEO_MODE xmode;
-            void *p = NULL;
-            while (XVideoListModes(&xmode, 0, 0, &p))
-            {
-                if (xmode.width == 1080)
-                    continue;
-                if (xmode.width == 720)
-                    continue; // 720x480 doesnt work on pbkit for some reason
-                XVideoSetMode(xmode.width, xmode.height, xmode.bpp, xmode.refresh);
-                ;
-                break;
-            }
-
-            SCREEN_WIDTH = xmode.width;
-            SCREEN_HEIGHT = xmode.height;
+            video_options->width = 640;
+            video_options->height = 480;
         }
     }
-    video_options->width = SCREEN_WIDTH;
-    video_options->height = SCREEN_HEIGHT;
-    #endif
+#endif
 
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
 
