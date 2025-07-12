@@ -1513,6 +1513,20 @@ static int SaveSlot()
     snprintf(gmpath, sizeof(gmpath), "%s\\%s", patches, "SAVEGAME");
     compat_mkdir(gmpath);
 
+#ifdef NXDK
+    // Add Xbox-specific savegame meta data only if the file doesn't already exist
+    FILE* titleMetaFile = fopen("E:\\UDATA\\FALLOUT1\\TitleMeta.xbx", "rb");
+    if (!titleMetaFile) {
+        titleMetaFile = fopen("E:\\UDATA\\FALLOUT1\\TitleMeta.xbx", "wb");
+        if (titleMetaFile) {
+            fprintf(titleMetaFile, "TitleName=Fallout\r\n");
+            fclose(titleMetaFile);
+        }
+    } else {
+        fclose(titleMetaFile);
+    }
+#endif
+
     snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
     compat_mkdir(gmpath);
 
