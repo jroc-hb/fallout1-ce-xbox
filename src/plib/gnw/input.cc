@@ -1,9 +1,11 @@
 #include "plib/gnw/input.h"
 
+#include <cmath>
 #include <limits.h>
 #include <stdio.h>
 
 #include "audio_engine.h"
+#include "game/map.h"
 #include "platform_compat.h"
 #include "plib/color/color.h"
 #include "plib/gnw/button.h"
@@ -1092,6 +1094,25 @@ void GNW95_process_message()
     if (dxinput_read_keyboard_buffer(&keyboardData)) {
         if (!kb_is_disabled()) {
             GNW95_process_key(&keyboardData);
+        }
+    }
+
+    // Analog camera pan using right stick
+    ControllerState controllerState;
+    if (dxinput_get_controller_state(&controllerState)) {
+        // Deadzone already applied in dxinput_get_controller_state
+        // Use a threshold to avoid spamming events for tiny values
+        const float pan_threshold = 0.05f;
+        if (fabs(controllerState.rightStickX) > pan_threshold || fabs(controllerState.rightStickY) > pan_threshold) {
+            // Analog pan speed: scale stick deflection to scroll speed
+            // Max speed: 1.5 tiles/frame since faster seems to cause artifacts
+            float max_speed = 1.5f;
+            int dx = (int)(controllerState.rightStickX * max_speed);
+            int dy = (int)(controllerState.rightStickY * max_speed);
+            // Only scroll if nonzero
+            if (dx != 0 || dy != 0) {
+                fallout::map_scroll(dx, dy);
+            }
         }
     }
 #endif

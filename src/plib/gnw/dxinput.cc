@@ -219,14 +219,20 @@ bool dxinput_get_controller_state(ControllerState* state)
     // Get analog stick values and normalize them to -1.0 to 1.0
     float axisX = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX) / 32767.0f;
     float axisY = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY) / 32767.0f;
+    float rightX = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTX) / 32767.0f;
+    float rightY = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_RIGHTY) / 32767.0f;
 
-    // Apply deadzone of 0.2
+    // Apply deadzone
     const float deadzone = 0.2f;
     if (fabs(axisX) < deadzone) axisX = 0;
     if (fabs(axisY) < deadzone) axisY = 0;
+    if (fabs(rightX) < deadzone) rightX = 0;
+    if (fabs(rightY) < deadzone) rightY = 0;
 
     state->analogX = axisX;
     state->analogY = axisY;
+    state->rightStickX = rightX;
+    state->rightStickY = rightY;
     state->buttonA = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_A) != 0;
     state->buttonB = SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_B) != 0;
 

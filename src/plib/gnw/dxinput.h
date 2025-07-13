@@ -9,6 +9,8 @@ namespace fallout {
 typedef struct ControllerState {
     float analogX;
     float analogY;
+    float rightStickX;  // Right stick X
+    float rightStickY;  // Right stick Y
     bool buttonA;
     bool buttonB;
 } ControllerState;
