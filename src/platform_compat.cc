@@ -277,9 +277,11 @@ int compat_mkdir(const char* path)
 
 unsigned int compat_timeGetTime()
 {
-    DbgPrint("compat_timeGetTime %i\n", SDL_GetTicks());
 #ifdef NXDK
-    return SDL_GetTicks();
+    static DWORD start = GetTickCount();
+    DWORD now = GetTickCount();
+    DbgPrint("compat_timeGetTime %i\n", now - start);
+    return now - start;
 #elif defined(_WIN32)
     return timeGetTime();
 #else

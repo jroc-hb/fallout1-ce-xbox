@@ -2880,7 +2880,12 @@ static int NameWindow()
     text_font(101);
 
     char name[64];
+#ifdef NXDK
+    // Can't type a name on an Xbox controller so we provide a default
+    strcpy(name, "Vault Dweller");
+#else
     strcpy(name, critter_name(obj_dude));
+#endif
 
     if (strcmp(name, "None") == 0) {
         name[0] = '\0';

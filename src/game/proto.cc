@@ -114,7 +114,11 @@ char proto_path_base[] = "proto\\";
 static char _aDrugStatSpecia[] = "Drug Stat (Special)";
 
 // 0x50D1C4
+#ifdef NXDK // Can't type a name on an Xbox controller so we provide a default
+static char _aNone_1[] = "Vault Dweller";
+#else
 static char _aNone_1[] = "None";
+#endif
 
 // 0x662CA8
 char* mp_critter_stats_list[2 + STAT_COUNT];

@@ -225,7 +225,11 @@ int critter_pc_set_name(const char* name)
 // 0x427A80
 void critter_pc_reset_name()
 {
+#ifdef NXDK // Can't type a name on an Xbox controller so we provide a default
+    strncpy(pc_name, "Vault Dweller", DUDE_NAME_MAX_LENGTH);
+#else
     strncpy(pc_name, "None", DUDE_NAME_MAX_LENGTH);
+#endif
 }
 
 // 0x427A9C
