@@ -1,3 +1,25 @@
+# Fallout Community Edition XBOX
+
+A port of Fallout 1 for the Original Xbox made using the NXDK
+
+# Features
+- Working FMVs
+- Working save system in UDATA that appears in MS Dashboard
+- Functioning mouse emulation on the controller with hot keys
+- 480p, 720p and 1080i support via ini file in UDATA
+- Default Vault Dweller name due to lack of keyboard
+- Fully "playable"
+
+# TODO
+- Custom Xbox control scheme potentially with direct character movement similar to Planescape/DevilutionX
+- Fix graphical problems with talking head overlays
+- Improve performance (NXDK SDL2 is software rendered)
+- Custom Xbox UI showing the hotkey buttons
+- Reconfigure individual save slots so that they appears separately in the MS Dashboard
+- USB Mouse and Keyboard support
+
+############# ORIGINAL README BELOW ################
+
 # Fallout Community Edition
 
 Fallout Community Edition is a fully working re-implementation of Fallout, with the same original gameplay, engine bugfixes, and some quality of life improvements, that works (mostly) hassle-free on multiple platforms.
