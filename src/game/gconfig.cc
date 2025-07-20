@@ -109,6 +109,9 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
     config_set_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_SHOW_SCRIPT_MESSAGES_KEY, 0);
     config_set_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_SHOW_LOAD_INFO_KEY, 0);
     config_set_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_OUTPUT_MAP_DATA_INFO_KEY, 0);
+#ifdef NXDK
+    config_set_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_DISABLE_FMV_KEY, 0);
+#endif
 
     if (isMapper) {
         config_set_string(&game_config, GAME_CONFIG_SYSTEM_KEY, GAME_CONFIG_EXECUTABLE_KEY, "mapper");

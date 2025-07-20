@@ -1,4 +1,4 @@
-# Fallout Community Edition XBOX Alpha
+# Fallout Community Edition XBOX v0.1.0-alpha
 
 An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much a work in progress with performance issue and very crude controller code but it boots and can be played!
 
@@ -9,16 +9,41 @@ An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much 
 - Right-stick camera control
 - 480p, 720p and 1080i support via ini file in UDATA (only 480p runs well)
 - Default "Vault Dweller" name on create character screen due to lack of keyboard
-- Fully playable in that you can probably beat the game without it crashing
+- Fully "playable" in that you can probably beat the game without it crashing
 
 # TO DO
-- Custom Xbox control scheme potentially with direct character movement similar to Planescape/DevilutionX
+- Custom Xbox control scheme potentially with direct character movement similar to Planescape PS4/DevilutionX
 - Fix graphical problems with talking head and conversation overlay screens
-- Improve performance (NXDK SDL2 is software rendered)
+- Fix audio crackling
+- Improve performance and optimize code (NXDK SDL2 is software rendered)
 - Custom Xbox UI graphics showing the hotkey buttons
 - Reconfigure save slots directory logic so that the individual slots appear separately in the MS Dashboard
 - USB Mouse and Keyboard support
 - Figure out if the NXDK issues I ran into are actual NXDK bugs or if I'm doing things wrong (SDL_SetRelativeMouseMode crashes the Xbox for instance)
+- General code cleanup since I've never ported a game before and am rusty when it comes to C/C++
+
+# Controls
+
+- Very WIP and will be remappable in the future
+
+| Xbox Controller Input      | Fallout Function          | Keyboard Equivalent |
+| -------------------------- | ------------------------- | ------------------- |
+| **Left Analog Stick**      | Mouse Movement            | N/A                 |
+| **Right Analog Stick**     | Camera Movement           | N/A                 |
+| **A**                      | Left Mouse Click          | N/A                 |
+| **B**                      | Right Mouse Click         | N/A                 |
+| **X**                      | Inventory                 | `I`                 |
+| **Y**                      | Pip-Boy                   | `P`                 |
+| **Back**                   | Character Sheet           | `C`                 |
+| **Start**                  | Options Menu              | `Esc`               |
+| **D-Pad Up**               | Menu Up / Navigate Up     | `↑`                 |
+| **D-Pad Down**             | Menu Down / Navigate Down | `↓`                 |
+| **D-Pad Left**             | Open Skilldex             | `S`                 |
+| **D-Pad Right**            | Quick Save Menu           | `F6`                |
+| **White**                  | End Turn                  | `SPACE`             |
+| **Black**                  | Exit Combat               | `ENTER`             |
+| **Left Stick Click**       | Center Camera on Player   | `Home`              |
+| **Right Stick Click**      | Enter Combat Mode         | `A`                 |
 
 # Installation Instructions
 - The FalloutCE folder contains `default.xbe`, `f1_res.ini` and `fallout.cfg`
@@ -48,8 +73,19 @@ An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much 
 - Either burn `fallout-ce.iso` to a DVD or copy the `fallout-ce` folder to your Xbox HDD
 
 # NOTES ON XEMU
-- FMV scenes cause XEMU to crash, so if you want to mess around on XEMU you will have to edit `gmovie_play()` so it instantly return `0` then recompile the game
+- FMV scenes cause XEMU to crash, so if you want to mess around on XEMU you will need to add this to your `fallout.cfg` file:
+- - 
+```[debug]
+disable_fmv=1
+```
+- - If you've already launched the game before then you will need to go to `UDATA/FALLOUT1` on your XEMU HDD and edit the `fallout.cfg` that is stored there
 - If you want to debug in XEMU you can build the project with `nxdk-cmake -DCMAKE_BUILD_TYPE=Debug` and launch XEMU with `./xemu.exe -device lpc47m157 -serial stdio` to activate the simulated serial output window
+
+# Special Thanks
+- Alexander Batalov for creating the Fallout1-ce project https://github.com/alexbatalov/fallout1-ce
+- The NXDK folks for creating a great SDK and answering my questions https://github.com/XboxDev/nxdk
+- Gleb Mazovetskiy (glebm) for his PR in the main Fallout1-ce repo that helped me fix the FMVs
+- THE XBOX SCENE at large for being awesome 
 
 -----------------------------------------------
 

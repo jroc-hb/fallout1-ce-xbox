@@ -127,17 +127,27 @@ static bool previousButtonStates[SDL_CONTROLLER_BUTTON_MAX] = { false };
 
 // Define default button mappings
 const ControllerKeyMapping CONTROLLER_KEY_MAPPINGS[] = {
-    // Face buttons
-    { SDL_CONTROLLER_BUTTON_X, SDL_SCANCODE_I },         // Inventory (I)
-    { SDL_CONTROLLER_BUTTON_Y, SDL_SCANCODE_C },         // Character screen (C)
-    { SDL_CONTROLLER_BUTTON_BACK, SDL_SCANCODE_ESCAPE }, // Options menu (Esc)
-    { SDL_CONTROLLER_BUTTON_START, SDL_SCANCODE_P },     // Pip-Boy (P)
-    
+    // Face buttons (A and B are set to the mouse buttons)
+    { SDL_CONTROLLER_BUTTON_X, SDL_SCANCODE_I }, // Inventory
+    { SDL_CONTROLLER_BUTTON_Y, SDL_SCANCODE_P }, // Pip-Boy
+
+    // Start/Back
+    { SDL_CONTROLLER_BUTTON_BACK, SDL_SCANCODE_C }, // Character Sheet
+    { SDL_CONTROLLER_BUTTON_START, SDL_SCANCODE_ESCAPE }, // Options Menu
+
     // D-Pad
-    { SDL_CONTROLLER_BUTTON_DPAD_UP, SDL_SCANCODE_UP },     // Move up
-    { SDL_CONTROLLER_BUTTON_DPAD_DOWN, SDL_SCANCODE_DOWN }, // Move down
-    { SDL_CONTROLLER_BUTTON_DPAD_LEFT, SDL_SCANCODE_LEFT }, // Move left
-    { SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_SCANCODE_RIGHT} // Move right
+    { SDL_CONTROLLER_BUTTON_DPAD_UP, SDL_SCANCODE_UP }, // Up
+    { SDL_CONTROLLER_BUTTON_DPAD_DOWN, SDL_SCANCODE_DOWN }, // Down
+    { SDL_CONTROLLER_BUTTON_DPAD_LEFT, SDL_SCANCODE_S }, // Skilldex
+    { SDL_CONTROLLER_BUTTON_DPAD_RIGHT, SDL_SCANCODE_F6 }, // Quick Save
+
+    // White and Black
+    { SDL_CONTROLLER_BUTTON_LEFTSHOULDER, SDL_SCANCODE_SPACE }, // (white) End Turn
+    { SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, SDL_SCANCODE_KP_ENTER },// (black) End Combat
+
+    // Thumbstick clicks
+    { SDL_CONTROLLER_BUTTON_LEFTSTICK, SDL_SCANCODE_HOME }, // Center Camera On Player
+    { SDL_CONTROLLER_BUTTON_RIGHTSTICK, SDL_SCANCODE_A }, // Activate Combat Mode
 };
 
 const int CONTROLLER_KEY_MAPPING_COUNT = sizeof(CONTROLLER_KEY_MAPPINGS) / sizeof(CONTROLLER_KEY_MAPPINGS[0]);

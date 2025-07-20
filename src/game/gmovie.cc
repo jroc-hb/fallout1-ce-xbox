@@ -101,6 +101,14 @@ int gmovie_save(DB_FILE* stream)
 // 0x44E690
 int gmovie_play(int game_movie, int game_movie_flags)
 {
+    // NXDK: Added this option since FMVs currently fail in XEMU
+#ifdef NXDK
+    int disable_FMV = 0;
+    config_get_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_DISABLE_FMV_KEY, &disable_FMV);
+    if (disable_FMV) {
+        return 0;
+    }
+#endif
     dir_entry de;
     char movieFilePath[COMPAT_MAX_PATH];
 
