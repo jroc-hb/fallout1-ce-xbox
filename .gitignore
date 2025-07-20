@@ -393,6 +393,7 @@ FodyWeavers.xsd
 /out
 /build
 /build-hwa
+/buildrelease
 
 # Xbox NXDK
 fallout-ce

@@ -1,24 +1,61 @@
-# Fallout Community Edition XBOX
+# Fallout Community Edition XBOX Alpha
 
-A port of Fallout 1 for the Original Xbox made using the NXDK
+An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much a work in progress with performance issue and very crude controller code but it boots and can be played!
 
 # Features
-- Working FMVs
+- Working FMVs (Thanks to glebm for his PR in the source repo)
 - Working save system in UDATA that appears in MS Dashboard
-- Functioning mouse emulation on the controller with hot keys
-- 480p, 720p and 1080i support via ini file in UDATA
-- Default Vault Dweller name due to lack of keyboard
-- Fully "playable"
+- Functioning (crude) mouse emulation on the controller with hot keys mapped to buttons
+- Right-stick camera control
+- 480p, 720p and 1080i support via ini file in UDATA (only 480p runs well)
+- Default "Vault Dweller" name on create character screen due to lack of keyboard
+- Fully playable in that you can probably beat the game without it crashing
 
-# TODO
+# TO DO
 - Custom Xbox control scheme potentially with direct character movement similar to Planescape/DevilutionX
-- Fix graphical problems with talking head overlays
+- Fix graphical problems with talking head and conversation overlay screens
 - Improve performance (NXDK SDL2 is software rendered)
-- Custom Xbox UI showing the hotkey buttons
-- Reconfigure individual save slots so that they appears separately in the MS Dashboard
+- Custom Xbox UI graphics showing the hotkey buttons
+- Reconfigure save slots directory logic so that the individual slots appear separately in the MS Dashboard
 - USB Mouse and Keyboard support
+- Figure out if the NXDK issues I ran into are actual NXDK bugs or if I'm doing things wrong (SDL_SetRelativeMouseMode crashes the Xbox for instance)
 
-############# ORIGINAL README BELOW ################
+# Installation Instructions
+- The FalloutCE folder contains `default.xbe`, `f1_res.ini` and `fallout.cfg`
+- You must supply the following files from your Fallout 1 install:
+- - `DATA` folder
+- - `CRITTER.DAT`
+- - `MASTER.DAT`
+- Once the FalloutCE folder has been prepared, FTP it to your Xbox HDD and launch default.xbe
+- The game should automatically create a `UDATA/FALLOUT1` folder and install relevant files
+- Saves will be stored in `UDATA/FALLOUT1` along with the `f1_res.ini` used to change the resolution and `fallout.cfg` used to change various options
+
+# Build Instructions
+- Install and set up NXDK https://github.com/XboxDev/nxdk
+- I personally use WSL Ubuntu 22.04.5 on Windows 11 for NXDK stuff
+- Clone this repo
+- Copy the following files from your Fallout 1 install to the fallout-ce folder in this repo
+- - `DATA` folder
+- - `CRITTER.DAT`
+- - `MASTER.DAT`
+- Open a terminal and run the NXDK activation script (`./nxdk/bin/activate`)
+- Run the following commands:
+- - `mkdir build`
+- - `cd build`
+- - `nxdk-cmake -DCMAKE_BUILD_TYPE=Release ..`
+- - `make` or `make -jX` where X is the number of CPU threads you want to use
+- You should end up with `fallout-ce.iso` in the root folder and `default.xbe` in your `fallout-ce` folder
+- Either burn `fallout-ce.iso` to a DVD or copy the `fallout-ce` folder to your Xbox HDD
+
+# NOTES ON XEMU
+- FMV scenes cause XEMU to crash, so if you want to mess around on XEMU you will have to edit `gmovie_play()` so it instantly return `0` then recompile the game
+- If you want to debug in XEMU you can build the project with `nxdk-cmake -DCMAKE_BUILD_TYPE=Debug` and launch XEMU with `./xemu.exe -device lpc47m157 -serial stdio` to activate the simulated serial output window
+
+-----------------------------------------------
+
+# ORIGINAL README BELOW #
+
+-----------------------------------------------
 
 # Fallout Community Edition
 
