@@ -395,6 +395,8 @@ FodyWeavers.xsd
 /build-hwa
 /buildrelease
 
-# Xbox NXDK
-fallout-ce
+# Xbox Build Stuff
+fallout-ce/*
+!fallout-ce/f1_res.ini
+!fallout-ce/fallout.cfg
 fallout-ce.iso
