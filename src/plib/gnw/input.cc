@@ -1,15 +1,14 @@
 #include "plib/gnw/input.h"
 
-#include <cmath>
 #include <limits.h>
 #include <stdio.h>
 
 #include "audio_engine.h"
-#include "game/map.h"
 #include "platform_compat.h"
 #include "plib/color/color.h"
 #include "plib/gnw/button.h"
 #include "plib/gnw/dxinput.h"
+#include "plib/gnw/gamepad.hpp"
 #include "plib/gnw/gnw.h"
 #include "plib/gnw/grbuf.h"
 #include "plib/gnw/intrface.h"
@@ -1087,36 +1086,10 @@ void GNW95_process_message()
     // is disabled, because if we ignore it, we'll never be able to reactivate
     // it again.
 
+    ProcessLeftStick();
+    ProcessRightStick();
+
     KeyboardData keyboardData;
-
-#ifdef NXDK
-    // Check controller buttons first before regular input processing
-    if (dxinput_read_keyboard_buffer(&keyboardData)) {
-        if (!kb_is_disabled()) {
-            GNW95_process_key(&keyboardData);
-        }
-    }
-
-    // Analog camera pan using right stick
-    ControllerState controllerState;
-    if (dxinput_get_controller_state(&controllerState)) {
-        // Deadzone already applied in dxinput_get_controller_state
-        // Use a threshold to avoid spamming events for tiny values
-        const float pan_threshold = 0.05f;
-        if (fabs(controllerState.rightStickX) > pan_threshold || fabs(controllerState.rightStickY) > pan_threshold) {
-            // Analog pan speed: scale stick deflection to scroll speed
-            // Max speed: 1.5 tiles/frame since faster seems to cause artifacts
-            float max_speed = 1.5f;
-            int dx = (int)(controllerState.rightStickX * max_speed);
-            int dy = (int)(controllerState.rightStickY * max_speed);
-            // Only scroll if nonzero
-            if (dx != 0 || dy != 0) {
-                fallout::map_scroll(dx, dy);
-            }
-        }
-    }
-#endif
-
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         switch (e.type) {
@@ -1142,6 +1115,27 @@ void GNW95_process_message()
                 keyboardData.down = (e.key.state & SDL_PRESSED) != 0;
                 GNW95_process_key(&keyboardData);
             }
+            break;
+        case SDL_JOYDEVICEADDED:
+            HandleJoystickDeviceAdded(e);
+            break;
+        case SDL_JOYDEVICEREMOVED:
+            HandleJoystickDeviceRemoved(e);
+            break;
+        case SDL_CONTROLLERDEVICEADDED:
+            HandleControllerDeviceAdded(e);
+            break;
+        case SDL_CONTROLLERDEVICEREMOVED:
+            HandleControllerDeviceRemoved(e);
+            break;
+        case SDL_CONTROLLERAXISMOTION:
+            HandleControllerAxisMotion(e);
+            break;
+        case SDL_CONTROLLERBUTTONUP:
+            HandleControllerButtonUp(e);
+            break;
+        case SDL_CONTROLLERBUTTONDOWN:
+            HandleControllerButtonDown(e);
             break;
         case SDL_WINDOWEVENT:
             switch (e.window.event) {

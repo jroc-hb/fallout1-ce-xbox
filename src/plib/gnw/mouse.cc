@@ -9,6 +9,9 @@
 #include "plib/gnw/touch.h"
 #include "plib/gnw/vcr.h"
 
+#ifdef NXDK
+#include "gamepad.hpp"
+#endif
 namespace fallout {
 
 static void mouse_colorize();
@@ -492,11 +495,19 @@ void mouse_info()
         if (mouseData.buttons[1] == 1) {
             buttons |= MOUSE_STATE_RIGHT_BUTTON_DOWN;
         }
-    } else {
-        x = 0;
-        y = 0;
     }
-
+#ifdef NXDK
+    // Gamepad button state to mouse button mapping
+    SDL_GameController* gGameController = GetController();
+    if (SDL_GameControllerGetAttached(gGameController)) {
+        if (SDL_GameControllerGetButton(gGameController, SDL_CONTROLLER_BUTTON_A)) {
+            buttons |= MOUSE_STATE_LEFT_BUTTON_DOWN;
+        }
+        if (SDL_GameControllerGetButton(gGameController, SDL_CONTROLLER_BUTTON_B)) {
+            buttons |= MOUSE_STATE_RIGHT_BUTTON_DOWN;
+        }
+    }
+#endif
     // Adjust for mouse senstivity.
     x = (int)(x * mouse_sensitivity);
     y = (int)(y * mouse_sensitivity);

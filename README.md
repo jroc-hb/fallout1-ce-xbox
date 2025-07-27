@@ -1,11 +1,11 @@
-# Fallout Community Edition XBOX v0.1.0-alpha
+# Fallout Community Edition XBOX v0.2.0-alpha
 
 An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much a work in progress with performance issue and very crude controller code but it boots and can be played!
 
 # Features
 - Working FMVs (Thanks to glebm for his PR in the source repo)
 - Working save system in UDATA that appears in MS Dashboard
-- Functioning (crude) mouse emulation on the controller with hot keys mapped to buttons
+- Functioning mouse emulation on the controller with hot keys mapped to buttons
 - Right-stick camera control
 - 480p, 720p and 1080i support via ini file in UDATA (only 480p runs well)
 - Default "Vault Dweller" name on create character screen due to lack of keyboard
@@ -44,6 +44,8 @@ An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much 
 | **Black**                  | Exit Combat               | `ENTER`             |
 | **Left Stick Click**       | Center Camera on Player   | `Home`              |
 | **Right Stick Click**      | Enter Combat Mode         | `A`                 |
+| **Left Trigger**           | Toggle Active Item Mode   | `N`                 |
+| **Right Trigger**          | Toggle Active Item        | `B`                 |
 
 # Installation Instructions
 - The FalloutCE folder contains `default.xbe`, `f1_res.ini` and `fallout.cfg`
@@ -84,7 +86,7 @@ disable_fmv=1
 # Special Thanks
 - Alexander Batalov for creating the Fallout1-ce project https://github.com/alexbatalov/fallout1-ce
 - The NXDK folks for creating a great SDK and answering my questions https://github.com/XboxDev/nxdk
-- Gleb Mazovetskiy (glebm) for his PR in the main Fallout1-ce repo that helped me fix the FMVs
+- Gleb Mazovetskiy (glebm) for his PRs in the main Fallout1-ce repo that helped me fix the FMVs and improve the controller support
 - THE XBOX SCENE at large for being awesome 
 
 -----------------------------------------------

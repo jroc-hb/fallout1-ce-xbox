@@ -49,6 +49,9 @@ void GNW95_input_exit();
 void GNW95_process_message();
 void GNW95_clear_time_stamps();
 void GNW95_lost_focus();
+#ifdef NXDK // Needed for mapping gamepad buttons to keys
+void GNW95_process_key(KeyboardData* data);
+#endif
 
 void beginTextInput();
 void endTextInput();
