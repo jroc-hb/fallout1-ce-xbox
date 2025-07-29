@@ -17,9 +17,33 @@ namespace fallout {
 
 static SDL_GameController* gController = nullptr;
 
-SDL_GameController* GetController()
+// Simulated mouse state using gamepad inputs
+int gGamepadLeftClick = 0;
+int gGamepadRightClick = 0;
+int gLeftStickDeltaX = 0;
+int gLeftStickDeltaY = 0;
+
+// Takes gamepad input and simulates mouse state
+bool GetGamepadMouseState(MouseData* mouseState)
 {
-    return gController;
+    if (!mouseState) {
+        return false;
+    }
+
+    mouseState->x = gLeftStickDeltaX;
+    mouseState->y = gLeftStickDeltaY;
+
+    mouseState->buttons[0] = gGamepadLeftClick;
+    mouseState->buttons[1] = gGamepadRightClick;
+
+    mouseState->wheelX = 0;
+    mouseState->wheelY = 0;
+
+    // Reset deltas after they've been consumed
+    gLeftStickDeltaX = 0;
+    gLeftStickDeltaY = 0;
+
+    return true;
 }
 
 namespace {
@@ -249,9 +273,16 @@ void HandleControllerAxisMotion(const SDL_Event& event)
 void HandleControllerButtonUp(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
-    debug_printf("Controller button up: %d\n", event.cbutton.button);
 
     switch (event.cbutton.button) {
+    case SDL_CONTROLLER_BUTTON_A: // Left Mouse Click
+        gGamepadLeftClick = 0;
+        break;
+
+    case SDL_CONTROLLER_BUTTON_B: // Right MouseClick
+        gGamepadRightClick = 0;
+        break;
+
     case SDL_CONTROLLER_BUTTON_X: // Inventory (I)
         simulatedKeyboardKey = {SDL_SCANCODE_I, 0};
         GNW95_process_key(&simulatedKeyboardKey);
@@ -313,7 +344,6 @@ void HandleControllerButtonUp(const SDL_Event& event)
         break;
 
     default:
-        debug_printf("Unhandled controller button up: %d\n", event.cbutton.button);
         break;
     }
 }
@@ -322,8 +352,15 @@ void HandleControllerButtonUp(const SDL_Event& event)
 void HandleControllerButtonDown(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
-    debug_printf("Controller button down: %d\n", event.cbutton.button);
     switch (event.cbutton.button) {
+    case SDL_CONTROLLER_BUTTON_A: // Left Click
+        gGamepadLeftClick = 1;
+        break;
+
+    case SDL_CONTROLLER_BUTTON_B: // Right Click
+        gGamepadRightClick = 1;
+        break;
+
     case SDL_CONTROLLER_BUTTON_X: // Inventory (I)
         simulatedKeyboardKey = {SDL_SCANCODE_I, 1};
         GNW95_process_key(&simulatedKeyboardKey);
@@ -385,7 +422,6 @@ void HandleControllerButtonDown(const SDL_Event& event)
         break;
 
     default:
-        debug_printf("Unhandled controller button up: %d\n", event.cbutton.button);
         break;
     }
 }
@@ -405,9 +441,9 @@ void ProcessLeftStick()
     int newY = y;
     acc.Pool(&newX, &newY, 2);
 
-    // clipping to viewport is handled in mouse_simulate_input
     if (newX != x || newY != y) {
-        mouse_simulate_input(newX - x, newY - y, 0);
+        gLeftStickDeltaX += (newX - x);
+        gLeftStickDeltaY += (newY - y);
     }
 }
 

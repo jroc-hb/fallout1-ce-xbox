@@ -484,6 +484,23 @@ void mouse_info()
     int buttons = 0;
 
     MouseData mouseData;
+#ifdef NXDK
+    if (GetGamepadMouseState(&mouseData)) {
+        x = mouseData.x;
+        y = mouseData.y;
+
+        if (mouseData.buttons[0] == 1) {
+            buttons |= MOUSE_STATE_LEFT_BUTTON_DOWN;
+        }
+
+        if (mouseData.buttons[1] == 1) {
+            buttons |= MOUSE_STATE_RIGHT_BUTTON_DOWN;
+        }
+    } else {
+        x = 0;
+        y = 0;
+    }
+#else
     if (dxinput_get_mouse_state(&mouseData)) {
         x = mouseData.x;
         y = mouseData.y;
@@ -495,22 +512,15 @@ void mouse_info()
         if (mouseData.buttons[1] == 1) {
             buttons |= MOUSE_STATE_RIGHT_BUTTON_DOWN;
         }
+    } else {
+        x = 0;
+        y = 0;
     }
-#ifdef NXDK
-    // Gamepad button state to mouse button mapping
-    SDL_GameController* gGameController = GetController();
-    if (SDL_GameControllerGetAttached(gGameController)) {
-        if (SDL_GameControllerGetButton(gGameController, SDL_CONTROLLER_BUTTON_A)) {
-            buttons |= MOUSE_STATE_LEFT_BUTTON_DOWN;
-        }
-        if (SDL_GameControllerGetButton(gGameController, SDL_CONTROLLER_BUTTON_B)) {
-            buttons |= MOUSE_STATE_RIGHT_BUTTON_DOWN;
-        }
-    }
-#endif
+
     // Adjust for mouse senstivity.
     x = (int)(x * mouse_sensitivity);
     y = (int)(y * mouse_sensitivity);
+#endif
 
     if (vcr_state == VCR_STATE_PLAYING) {
         if (((vcr_terminate_flags & VCR_TERMINATE_ON_MOUSE_PRESS) != 0 && buttons != 0)
@@ -763,12 +773,21 @@ bool mouse_query_exist()
 void mouse_get_raw_state(int* x, int* y, int* buttons)
 {
     MouseData mouseData;
+#ifdef NXDK
+    if (!GetGamepadMouseState(&mouseData)) {
+        mouseData.x = 0;
+        mouseData.y = 0;
+        mouseData.buttons[0] = (mouse_buttons & MOUSE_EVENT_LEFT_BUTTON_DOWN) != 0;
+        mouseData.buttons[1] = (mouse_buttons & MOUSE_EVENT_RIGHT_BUTTON_DOWN) != 0;
+    }
+#else
     if (!dxinput_get_mouse_state(&mouseData)) {
         mouseData.x = 0;
         mouseData.y = 0;
         mouseData.buttons[0] = (mouse_buttons & MOUSE_EVENT_LEFT_BUTTON_DOWN) != 0;
         mouseData.buttons[1] = (mouse_buttons & MOUSE_EVENT_RIGHT_BUTTON_DOWN) != 0;
     }
+#endif
 
     raw_buttons = 0;
     raw_x += mouseData.x;
