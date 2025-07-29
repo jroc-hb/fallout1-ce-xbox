@@ -399,4 +399,10 @@ FodyWeavers.xsd
 fallout-ce/*
 !fallout-ce/f1_res.ini
 !fallout-ce/fallout.cfg
+!fallout-ce/TitleImage.xbx
 fallout-ce.iso
+
+fallout-ce/DATA/*
+!fallout-ce/DATA/
+!fallout-ce/DATA/SaveImage.xbx
+!fallout-ce/DATA/SaveMeta.xbx

@@ -49,6 +49,11 @@
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
 
+#ifdef NXDK
+#include <windows.h>
+#include "game/palette.h"
+#endif
+
 namespace fallout {
 
 #define LOAD_SAVE_SIGNATURE "FALLOUT SAVE FILE"
@@ -800,6 +805,12 @@ int SaveGame(int mode)
         }
     }
 
+#ifdef NXDK
+    if(SaveXboxSave(slot_cursor + 1)) {
+        debug_printf("\nLOADSAVE: SUCCESS saving slot%d to Xbox save directory! **\n", slot_cursor + 1);
+    }
+#endif
+
     return rc;
 }
 
@@ -1512,20 +1523,6 @@ static int SaveSlot()
 
     snprintf(gmpath, sizeof(gmpath), "%s\\%s", patches, "SAVEGAME");
     compat_mkdir(gmpath);
-
-#ifdef NXDK
-    // Add Xbox-specific savegame meta data only if the file doesn't already exist
-    FILE* titleMetaFile = fopen("E:\\UDATA\\FALLOUT1\\TitleMeta.xbx", "rb");
-    if (!titleMetaFile) {
-        titleMetaFile = fopen("E:\\UDATA\\FALLOUT1\\TitleMeta.xbx", "wb");
-        if (titleMetaFile) {
-            fprintf(titleMetaFile, "TitleName=Fallout\r\n");
-            fclose(titleMetaFile);
-        }
-    } else {
-        fclose(titleMetaFile);
-    }
-#endif
 
     snprintf(gmpath, sizeof(gmpath), "%s\\%s\\%s%.2d", patches, "SAVEGAME", "SLOT", slot_cursor + 1);
     compat_mkdir(gmpath);
@@ -2846,7 +2843,182 @@ static int EraseSave()
 
     compat_remove(str0);
 
+#ifdef NXDK
+    if(EraseXboxSave(slot_cursor + 1)) {
+        debug_printf("SUCCESS erased Xbox save slot %d\n", slot_cursor + 1);
+    }
+#endif
+
     return 0;
 }
+
+#ifdef NXDK
+// Copies saves from the Fallout SAVEDATA/SLOT directories to the main UDATA/FALLOUT1 folder so that saves appear in the dashboard
+int InitSyncXboxSaveSlots()
+{
+    const char *falloutRoot = "E:\\UDATA\\FALLOUT1";
+    const char *savegameDir = "E:\\UDATA\\FALLOUT1\\DATA\\SAVEGAME";
+
+    if (GetFileAttributesA(falloutRoot) == INVALID_FILE_ATTRIBUTES) {
+        debug_printf("Fallout root directory does not exist: %s\n", falloutRoot);
+        return 0;
+    }
+
+    if (GetFileAttributesA(savegameDir) == INVALID_FILE_ATTRIBUTES) {
+        debug_printf("No in-game save directory, skipping sync.\n");
+        return 0;
+    }
+
+    // Check for at least one SLOTxx folder
+    bool slotFound = false;
+    char slotPath[COMPAT_MAX_PATH];
+
+    for (int i = 1; i <= 10; ++i)
+    {
+        snprintf(slotPath, sizeof(slotPath), "%s\\SLOT%02d", falloutRoot, i);
+        if (GetFileAttributesA(slotPath)) {
+            slotFound = true;
+            break;
+        }
+    }
+
+    if (!slotFound) {
+        debug_printf("No SLOTxx folders found, nothing to sync.\n");
+        return 0;
+    }
+
+    // Clear SAVEGAME directory
+    debug_printf("Clearing SAVEGAME directory...\n");
+    compat_delete_directory_recursive(savegameDir);
+
+    // Recreate empty SAVEGAME folder
+    CreateDirectoryA(savegameDir, NULL);
+
+    // Copy each existing SLOTxx to SAVEGAME
+    for (int i = 1; i <= 10; ++i)
+    {
+        snprintf(slotPath, sizeof(slotPath), "%s\\SLOT%02d", falloutRoot, i);
+        if (GetFileAttributesA(slotPath)) {
+            char dstPath[COMPAT_MAX_PATH];
+            snprintf(dstPath, sizeof(dstPath), "%s\\SLOT%02d", savegameDir, i);
+            debug_printf("Copying %s -> %s\n", slotPath, dstPath);
+            compat_copy_directory_recursive(slotPath, dstPath);
+        }
+    }
+
+    debug_printf("Save slot sync complete.\n");
+    return 0;
+}
+
+// Delete Save Slot from E:\UDATA\FALLOUT1\SLOTxx
+static int EraseXboxSave(int slot)
+{
+    if (slot < 1 || slot > 10) {
+        debug_printf("Invalid slot number: %d\n", slot);
+        return -1;
+    }
+
+    char path[COMPAT_MAX_PATH];
+    snprintf(path, sizeof(path), "E:\\UDATA\\FALLOUT1\\SLOT%02d", slot);
+
+    DWORD attrs = GetFileAttributesA(path);
+    if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        debug_printf("Save slot does not exist: %s\n", path);
+        return -1;
+    }
+
+    debug_printf("Erasing save slot: %s\n", path);
+    if (!compat_delete_directory_recursive(path)) {
+        debug_printf("Failed to delete save slot: %s\n", path);
+        return -1;
+    }
+
+    debug_printf("Save slot %d deleted successfully.\n", slot);
+    return 0;
+}
+
+// Creates a valid binary TitleMeta.xbx for the root FALLOUT1 directory
+int create_root_titlemeta()
+{
+    const char* metaPath = "E:\\UDATA\\FALLOUT1\\TitleMeta.xbx";
+    FILE *fp = fopen(metaPath, "wb");
+	fprintf(fp, "TitleName=Fallout\r\n");
+	fclose(fp);
+    return 0;
+}
+
+// Creates a valid binary SaveMeta.xbx for the individual save slots
+static int create_savemeta_xbx(const char* folderPath, int slot) {
+    char fullPath[COMPAT_MAX_PATH];
+    snprintf(fullPath, sizeof(fullPath), "%s\\SaveMeta.xbx", folderPath);
+
+    FILE *fp = fopen(fullPath, "wb");
+    if (!fp) {
+        return -1;
+    }
+
+    // Write UTF-16LE BOM
+    uint8_t bom[2] = {0xFF, 0xFE};
+    fwrite(bom, 1, 2, fp);
+
+    // Prepare ASCII string
+    char asciiStr[32];
+    int len = snprintf(asciiStr, sizeof(asciiStr), "Name=SLOT%02d\r\n", slot);
+
+    // Convert ASCII to UTF-16LE manually and write
+    // Each ASCII char becomes 2 bytes: char byte + 0x00
+    for (int i = 0; i < len; i++) {
+        uint8_t utf16le_char[2] = { (uint8_t)asciiStr[i], 0x00 };
+        fwrite(utf16le_char, 1, 2, fp);
+    }
+
+    fclose(fp);
+    return 0;
+}
+
+// Copy Save Slot from E:\UDATA\FALLOUT1\SAVEDATA\SLOTxx to E:\UDATA\FALLOUT1\SLOTxx
+static int SaveXboxSave(int slot)
+{
+    if (slot < 1 || slot > 10) {
+        debug_printf("Invalid slot number: %d\n", slot);
+        return -1;
+    }
+    debug_printf("Saving Xbox save slot %d...\n", slot);
+
+    char srcPath[COMPAT_MAX_PATH];
+    char dstPath[COMPAT_MAX_PATH];
+
+    snprintf(srcPath, sizeof(srcPath), "E:\\UDATA\\FALLOUT1\\DATA\\SAVEGAME\\SLOT%02d", slot);
+    snprintf(dstPath, sizeof(dstPath), "E:\\UDATA\\FALLOUT1\\SLOT%02d", slot);
+
+    DWORD attrs = GetFileAttributesA(srcPath);
+    if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        debug_printf("ERROR: Source slot does not exist: %s\n", srcPath);
+        return -1;
+    }
+    debug_printf("Source slot exists: %s\n", srcPath);
+
+    // Copy contents
+    debug_printf("Saving SLOT%02d from %s to %s...\n", slot, srcPath, dstPath);
+    if (!compat_copy_directory_recursive(srcPath, dstPath)) {
+        debug_printf("Failed to copy save slot %d\n", slot);
+        return -1;
+    }
+    debug_printf("Save slot %d copied successfully.\n", slot);
+
+    // Create SaveMeta.xbx
+    if (create_savemeta_xbx(dstPath, slot) != 0) {
+        debug_printf("Failed to create SaveMeta.xbx for slot %d\n", slot);
+        return -1;
+    }
+
+    // Create SaveImage.xbx
+    char imagePath[COMPAT_MAX_PATH];
+    snprintf(imagePath, sizeof(imagePath), "E:\\UDATA\\FALLOUT1\\SLOT%02d\\SaveImage.xbx", slot);
+    fallout::save_thumbnail_bmp(imagePath, thumbnail_image[1], LS_PREVIEW_WIDTH, LS_PREVIEW_HEIGHT);
+
+    return 0;
+}
+#endif
 
 } // namespace fallout

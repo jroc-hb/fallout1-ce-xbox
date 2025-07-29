@@ -27,6 +27,12 @@ int isLoadingGame();
 void KillOldMaps();
 int MapDirErase(const char* path, const char* a2);
 int MapDirEraseFile(const char* a1, const char* a2);
+#ifdef NXDK
+int InitSyncXboxSaveSlots();
+int SaveXboxSave(int slot);
+int EraseXboxSave(int slot);
+int create_root_titlemeta();
+#endif
 
 } // namespace fallout
 

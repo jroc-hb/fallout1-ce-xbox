@@ -23,6 +23,7 @@
 #include <string.h>
 #include <windows.h>
 #include <xboxkrnl/xboxkrnl.h>
+#include "game/loadsave.h"
 #endif
 
 namespace fallout {
@@ -142,6 +143,15 @@ int main(int argc, char* argv[])
         assert(copySuccess);
     }
 
+    // Register save directory by installing TitleImage.xbx and TitleMeta.xbx to HDD
+    if (GetFileAttributesA("E:\\UDATA\\FALLOUT1\\TitleImage.xbx") == INVALID_FILE_ATTRIBUTES) {
+        DbgPrint("Copying TitleImage.xbx to E:\\UDATA\\FALLOUT1\\TitleImage.xbx\n");
+        BOOL copySuccess = CopyFileA("D:\\TitleImage.xbx", "E:\\UDATA\\FALLOUT1\\TitleImage.xbx", FALSE);
+        DbgPrint("CopyFileA TitleImage.xbx: %s\n", copySuccess ? "success" : "failed");
+        assert(copySuccess);
+    }
+    fallout::create_root_titlemeta();
+
     // Install DATA/TEXT files to HDD (Should work for all languages)
     auto CopyDirectoryRecursive = [](const char* srcDir, const char* dstDir, auto& self) -> void {
         WIN32_FIND_DATAA findData;
@@ -204,6 +214,23 @@ int main(int argc, char* argv[])
         DbgPrint("Finished copying D:\\DATA\\TEXT\n");
     } else {
         DbgPrint("E:\\UDATA\\FALLOUT1\\DATA\\TEXT already exists, skipping copy.\n");
+    }
+
+    // Install DATA folder "save" metadata for the Xbox dashboard
+    if (GetFileAttributesA("E:\\UDATA\\FALLOUT1\\DATA\\SaveImage.xbx") == INVALID_FILE_ATTRIBUTES) {
+        BOOL copySuccess = CopyFileA("D:\\DATA\\SaveImage.xbx", "E:\\UDATA\\FALLOUT1\\DATA\\SaveImage.xbx", FALSE);
+        assert(copySuccess);
+    }
+    if (GetFileAttributesA("E:\\UDATA\\FALLOUT1\\DATA\\SaveMeta.xbx") == INVALID_FILE_ATTRIBUTES) {
+        BOOL copySuccess = CopyFileA("D:\\DATA\\SaveMeta.xbx", "E:\\UDATA\\FALLOUT1\\DATA\\SaveMeta.xbx", FALSE);
+        assert(copySuccess);
+    }
+
+    // Sync save slot data from the main Fallout UDATA directory to the DATA/SAVEGAME directory
+    if (fallout::InitSyncXboxSaveSlots()) {
+        DbgPrint("Failed to sync save slots.\n");
+    } else {
+        DbgPrint("Save slot sync complete.\n");
     }
 #endif
 

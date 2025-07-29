@@ -426,4 +426,83 @@ long getFileSize(FILE* stream)
     return filesize;
 }
 
+#ifdef NXDK
+bool compat_delete_directory_recursive(const char *path)
+{
+    char searchPath[MAX_PATH];
+    snprintf(searchPath, sizeof(searchPath), "%s\\*", path);
+
+    WIN32_FIND_DATAA ffd;
+    HANDLE hFind = FindFirstFileA(searchPath, &ffd);
+
+    if (hFind == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    do {
+        if (strcmp(ffd.cFileName, ".") == 0 || strcmp(ffd.cFileName, "..") == 0)
+            continue;
+
+        char fullPath[MAX_PATH];
+        snprintf(fullPath, sizeof(fullPath), "%s\\%s", path, ffd.cFileName);
+
+        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            // Recurse into subdirectory
+            compat_delete_directory_recursive(fullPath);
+            RemoveDirectoryA(fullPath);
+        } else {
+            DeleteFileA(fullPath);
+        }
+
+    } while (FindNextFileA(hFind, &ffd) != 0);
+
+    FindClose(hFind);
+
+    // Remove the now-empty root directory
+    return RemoveDirectoryA(path) != 0;
+}
+
+bool compat_copy_directory_recursive(const char *srcDir, const char *dstDir)
+{
+    // Create the destination directory if it doesn't exist
+    CreateDirectoryA(dstDir, NULL);
+
+    char searchPath[MAX_PATH];
+    snprintf(searchPath, sizeof(searchPath), "%s\\*", srcDir);
+
+    WIN32_FIND_DATAA ffd;
+    HANDLE hFind = FindFirstFileA(searchPath, &ffd);
+
+    if (hFind == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    do {
+        if (strcmp(ffd.cFileName, ".") == 0 || strcmp(ffd.cFileName, "..") == 0)
+            continue;
+
+        char srcPath[MAX_PATH], dstPath[MAX_PATH];
+        snprintf(srcPath, sizeof(srcPath), "%s\\%s", srcDir, ffd.cFileName);
+        snprintf(dstPath, sizeof(dstPath), "%s\\%s", dstDir, ffd.cFileName);
+
+        if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            // Recursively copy subdirectory
+            if (!compat_copy_directory_recursive(srcPath, dstPath)) {
+                FindClose(hFind);
+                return false;
+            }
+        } else {
+            // Copy file
+            if (!CopyFileA(srcPath, dstPath, FALSE)) {
+               DbgPrint("Failed to copy file: %s -> %s\n", srcPath, dstPath);
+            }
+        }
+
+    } while (FindNextFileA(hFind, &ffd) != 0);
+
+    FindClose(hFind);
+    return true;
+}
+#endif
+
 } // namespace fallout

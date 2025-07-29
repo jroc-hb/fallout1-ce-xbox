@@ -43,7 +43,10 @@ void compat_windows_path_to_native(char* path);
 void compat_resolve_path(char* path);
 char* compat_strdup(const char* string);
 long getFileSize(FILE* stream);
-
+#ifdef NXDK
+bool compat_delete_directory_recursive(const char *path);
+bool compat_copy_directory_recursive(const char *srcDir, const char *dstDir);
+#endif
 } // namespace fallout
 
 #endif /* FALLOUT_PLATFORM_COMPAT_H_ */

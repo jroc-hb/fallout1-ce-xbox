@@ -83,6 +83,10 @@ disable_fmv=1
 - - If you've already launched the game before then you will need to go to `UDATA/FALLOUT1` on your XEMU HDD and edit the `fallout.cfg` that is stored there
 - If you want to debug in XEMU you can build the project with `nxdk-cmake -DCMAKE_BUILD_TYPE=Debug` and launch XEMU with `./xemu.exe -device lpc47m157 -serial stdio` to activate the simulated serial output window
 
+# Save Icon Credit
+- https://www.iconarchive.com/show/mega-games-pack-25-icons-by-3xhumed/Fallout-1-icon.html
+- - https://creativecommons.org/licenses/by-nc-nd/4.0/
+
 # Special Thanks
 - Alexander Batalov for creating the Fallout1-ce project https://github.com/alexbatalov/fallout1-ce
 - The NXDK folks for creating a great SDK and answering my questions https://github.com/XboxDev/nxdk
