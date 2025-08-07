@@ -38,12 +38,48 @@ namespace fallout {
 
 int compat_stricmp(const char* string1, const char* string2)
 {
+#ifdef NXDK
+    // NXDK TODO: Investigate further.... is the array busted?
+    // NXDK SDL_strcasecmp uppercases before comparing, breaking compatibility with Fallout's sort order 
+    while (*string1 && *string2) {
+        char c1 = *string1++;
+        char c2 = *string2++;
+
+        // Convert to lowercase if it's an uppercase ASCII letter
+        if (c1 >= 'A' && c1 <= 'Z') c1 += 32;
+        if (c2 >= 'A' && c2 <= 'Z') c2 += 32;
+
+        if (c1 != c2) return (unsigned char)c1 - (unsigned char)c2;
+    }
+
+    return (unsigned char)*string1 - (unsigned char)*string2;
+#else
     return SDL_strcasecmp(string1, string2);
+#endif
 }
 
 int compat_strnicmp(const char* string1, const char* string2, size_t size)
 {
+#ifdef NXDK
+    // NXDK TODO: Investigate further.... is the array busted?
+    for (size_t i = 0; i < size; ++i) {
+        unsigned char c1 = (unsigned char)string1[i];
+        unsigned char c2 = (unsigned char)string2[i];
+
+        // If we hit a null terminator in either string, stop comparing
+        if (c1 == '\0' || c2 == '\0') {
+            return tolower(c1) - tolower(c2);
+        }
+
+        int diff = tolower(c1) - tolower(c2);
+        if (diff != 0) {
+            return diff;
+        }
+    }
+    return 0; // Strings are equal up to 'size' characters
+#else
     return SDL_strncasecmp(string1, string2, size);
+#endif
 }
 
 char* compat_strupr(char* string)
@@ -297,17 +333,20 @@ FILE* compat_fopen(const char* path, const char* mode)
 #ifdef NXDK
     strcpy(nativePath, path);
     compat_windows_path_to_native(nativePath);
-    // if (mode && (mode[0] == 'w' || mode[0] == 'a')) {
-    //     DbgPrint("compat_fopen: creating/writing file: %s (mode: %s)\n", nativePath, mode);
-    // } else {
-    //     DbgPrint("compat_fopen: opening file: %s (mode: %s)\n", nativePath, mode);
-    // }
+
+    FILE* fp = NULL;
     if (strcmp(mode, "rt") == 0) {
         // NXDK seemingly doesn't support "rt" mode, so we use "rb" instead
-        return fopen(nativePath, "rb");
+        fp = fopen(nativePath, "rb");
     } else {
-        return fopen(nativePath, mode);
+        fp = fopen(nativePath, mode);
     }
+
+    if (!fp) {
+        DbgPrint("\nALERT! fopen failed for path: %s (mode: %s)\n", nativePath, mode);
+    }
+
+    return fp;
 #else
     strcpy(nativePath, path);
     compat_windows_path_to_native(nativePath);

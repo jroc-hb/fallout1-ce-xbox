@@ -129,6 +129,11 @@ int main(int argc, char* argv[])
     DbgPrint("CreateDirectoryA E:\\UDATA\\FALLOUT1\\data: %s\n", dirSuccess ? "success" : "failed");
     assert(dirSuccess);
 
+    DbgPrint("Creating directory E:\\UDATA\\FALLOUT1\\data\\SAVEGAME\n");
+    dirSuccess = CreateDirectoryA("E:\\UDATA\\FALLOUT1\\data\\SAVEGAME", NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
+    DbgPrint("CreateDirectoryA E:\\UDATA\\FALLOUT1\\data\\SAVEGAME: %s\n", dirSuccess ? "success" : "failed");
+    assert(dirSuccess);
+
     // Install fallout.cfg and f1_res.ini to HDD
     if (GetFileAttributesA("E:\\UDATA\\FALLOUT1\\fallout.cfg") == INVALID_FILE_ATTRIBUTES) {
         DbgPrint("Copying fallout.cfg to E:\\UDATA\\FALLOUT1\\fallout.cfg\n");

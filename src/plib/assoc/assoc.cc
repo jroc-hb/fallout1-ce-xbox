@@ -145,6 +145,34 @@ int assoc_free(assoc_array* a)
 // 0x4D9CC4
 static int assoc_find(assoc_array* a, const char* name, int* position)
 {
+#ifdef NXDK
+    // NXDK TODO: Double check this algorithm
+    // The original code's binary search implementation was flawed and didn't really do a binary search
+    if (a->init_flag != DICTIONARY_MARKER) {
+        return -1;
+    }
+
+    int l = 0;
+    int r = a->size - 1;
+
+    while (l <= r) {
+        int mid = (l + r) / 2;
+        int cmp = compat_stricmp(name, a->list[mid].name);
+
+        if (cmp == 0) {
+            *position = mid;
+            return 0;
+        } else if (cmp < 0) {
+            r = mid - 1;
+        } else {
+            l = mid + 1;
+        }
+    }
+
+    // Not found, insertion point is at `l`
+    *position = l;
+    return -1;
+#else
     if (a->init_flag != DICTIONARY_MARKER) {
         return -1;
     }
@@ -185,6 +213,7 @@ static int assoc_find(assoc_array* a, const char* name, int* position)
     }
 
     return -1;
+#endif
 }
 
 // Returns the index of the entry for the specified key, or -1 if it's not
