@@ -32,6 +32,10 @@
 #include <chrono>
 #endif
 
+#ifdef NXDK
+#include "plib/gnw/debug.h"
+#endif
+
 #include <SDL.h>
 
 namespace fallout {
@@ -41,18 +45,19 @@ int compat_stricmp(const char* string1, const char* string2)
 #ifdef NXDK
     // NXDK TODO: Investigate further.... is the array busted?
     // NXDK SDL_strcasecmp uppercases before comparing, breaking compatibility with Fallout's sort order 
+    char a = 0;
+    char b = 0;
     while (*string1 && *string2) {
-        char c1 = *string1++;
-        char c2 = *string2++;
-
-        // Convert to lowercase if it's an uppercase ASCII letter
-        if (c1 >= 'A' && c1 <= 'Z') c1 += 32;
-        if (c2 >= 'A' && c2 <= 'Z') c2 += 32;
-
-        if (c1 != c2) return (unsigned char)c1 - (unsigned char)c2;
+        a = SDL_tolower((unsigned char) *string1);
+        b = SDL_tolower((unsigned char) *string2);
+        if (a != b)
+            break;
+        ++string1;
+        ++string2;
     }
-
-    return (unsigned char)*string1 - (unsigned char)*string2;
+    a = SDL_tolower(*string1);
+    b = SDL_tolower(*string2);
+    return (int) ((unsigned char) a - (unsigned char) b);
 #else
     return SDL_strcasecmp(string1, string2);
 #endif
@@ -62,21 +67,24 @@ int compat_strnicmp(const char* string1, const char* string2, size_t size)
 {
 #ifdef NXDK
     // NXDK TODO: Investigate further.... is the array busted?
-    for (size_t i = 0; i < size; ++i) {
-        unsigned char c1 = (unsigned char)string1[i];
-        unsigned char c2 = (unsigned char)string2[i];
-
-        // If we hit a null terminator in either string, stop comparing
-        if (c1 == '\0' || c2 == '\0') {
-            return tolower(c1) - tolower(c2);
-        }
-
-        int diff = tolower(c1) - tolower(c2);
-        if (diff != 0) {
-            return diff;
-        }
+    char a = 0;
+    char b = 0;
+    while (*string1 && *string2 && size) {
+        a = SDL_tolower((unsigned char) *string1);
+        b = SDL_tolower((unsigned char) *string2);
+        if (a != b)
+            break;
+        ++string1;
+        ++string2;
+        --size;
     }
-    return 0; // Strings are equal up to 'size' characters
+    if (size == 0) {
+        return 0;
+    } else {
+        a = SDL_tolower((unsigned char) *string1);
+        b = SDL_tolower((unsigned char) *string2);
+        return (int) ((unsigned char) a - (unsigned char) b);
+    }
 #else
     return SDL_strncasecmp(string1, string2, size);
 #endif
@@ -99,7 +107,6 @@ char* compat_itoa(int value, char* buffer, int radix)
 
 void compat_splitpath(const char* path, char* drive, char* dir, char* fname, char* ext)
 {
-    DbgPrint("compat_splitpath: %s\n", path);
     const char* driveStart = path;
     if (path[0] == '/' && path[1] == '/') {
         path += 2;
@@ -165,7 +172,6 @@ void compat_splitpath(const char* path, char* drive, char* dir, char* fname, cha
 
 void compat_makepath(char* path, const char* drive, const char* dir, const char* fname, const char* ext)
 {
-    DbgPrint("compat_makepath: %s\n", path);
     path[0] = '\0';
 
     if (drive != NULL) {
@@ -228,19 +234,12 @@ void compat_makepath(char* path, const char* drive, const char* dir, const char*
 int compat_open(const char* filePath, int flags)
 {
 #ifdef NXDK
-    char nativePath[COMPAT_MAX_PATH];
+    const char* mode = (flags & O_WRONLY) ? "wb" : "rb";
+    char nativePath[COMPAT_MAX_PATH] = {0};
     strcat(nativePath, filePath);
     compat_windows_path_to_native(nativePath);
-    const char* mode = (flags & O_WRONLY) ? "wb" : "rb";
     FILE* fp = fopen(nativePath, mode);
-
-    // NXDK seemingly doesn't support "rt" mode, so we use "rb" instead
-    if (strcmp(mode, "rt") == 0) {
-        FILE* fp = fopen(nativePath, "rb");
-    } else {
-        FILE* fp = fopen(nativePath, mode);
-    }
-    return fp ? reinterpret_cast<intptr_t>(fp) : -1;
+    return fp ? (int)(intptr_t)fp : -1;
 #else
     const char* mode = (flags & O_WRONLY) ? "wb" : "rb";
     FILE* fp = fopen(filePath, mode);
@@ -257,7 +256,7 @@ int compat_close(int fileHandle)
 
 int compat_read(int fileHandle, void* buf, unsigned int size)
 {
-    DbgPrint("compat_read: %s %d\n", fileHandle, size);
+    debug_printf("compat_read: %s %d\n", fileHandle, size);
     FILE* fp = reinterpret_cast<FILE*>(fileHandle);
     return fread(buf, 1, size, fp);
 }
@@ -270,7 +269,7 @@ int compat_write(int fileHandle, const void* buf, unsigned int size)
 
 long compat_lseek(int fileHandle, long offset, int origin)
 {
-    DbgPrint("compat_lseek: %i\n", fileHandle);
+    debug_printf("compat_lseek: %i\n", fileHandle);
     FILE* fp = reinterpret_cast<FILE*>(fileHandle);
     return fseek(fp, offset, origin) == 0 ? ftell(fp) : -1;
 }
@@ -283,7 +282,7 @@ long compat_tell(int fileHandle)
 
 long compat_filelength(int fileHandle)
 {
-    DbgPrint("compat_filelength: %i\n", fileHandle);
+    debug_printf("compat_filelength: %i\n", fileHandle);
     FILE* fp = reinterpret_cast<FILE*>(fileHandle);
     long originalOffset = ftell(fp);
     fseek(fp, 0, SEEK_END);
@@ -301,7 +300,7 @@ int compat_mkdir(const char* path)
 
 #ifdef _WIN32
     #ifdef NXDK
-    DbgPrint("compat_mkdir: %s\n", nativePath);
+    debug_printf("compat_mkdir: %s\n", nativePath);
     return CreateDirectoryA(nativePath, NULL);
     #else
     return mkdir(nativePath);
@@ -316,7 +315,7 @@ unsigned int compat_timeGetTime()
 #ifdef NXDK
     static DWORD start = GetTickCount();
     DWORD now = GetTickCount();
-    DbgPrint("compat_timeGetTime %i\n", now - start);
+    debug_printf("compat_timeGetTime %i\n", now - start);
     return now - start;
 #elif defined(_WIN32)
     return timeGetTime();
@@ -343,7 +342,7 @@ FILE* compat_fopen(const char* path, const char* mode)
     }
 
     if (!fp) {
-        DbgPrint("\nALERT! fopen failed for path: %s (mode: %s)\n", nativePath, mode);
+        debug_printf("\nALERT! fopen failed for path: %s (mode: %s)\n", nativePath, mode);
     }
 
     return fp;
@@ -357,7 +356,7 @@ FILE* compat_fopen(const char* path, const char* mode)
 
 int compat_remove(const char* path)
 {
-    DbgPrint("compat_remove: %s\n", path);
+    debug_printf("compat_remove: %s\n", path);
     char nativePath[COMPAT_MAX_PATH];
     strcpy(nativePath, path);
     compat_windows_path_to_native(nativePath);
@@ -367,7 +366,7 @@ int compat_remove(const char* path)
 
 int compat_rename(const char* oldFileName, const char* newFileName)
 {
-    DbgPrint("compat_rename: %s to %s\n", oldFileName, newFileName);
+    debug_printf("compat_rename: %s to %s\n", oldFileName, newFileName);
     char nativeOldFileName[COMPAT_MAX_PATH];
     char nativeNewFileName[COMPAT_MAX_PATH];
 
@@ -450,7 +449,7 @@ void compat_resolve_path(char* path)
 
 char* compat_strdup(const char* string)
 {
-    DbgPrint("compat_strdup: %s\n", string);
+    debug_printf("compat_strdup: %s\n", string);
     return SDL_strdup(string);
 }
 
@@ -533,7 +532,7 @@ bool compat_copy_directory_recursive(const char *srcDir, const char *dstDir)
         } else {
             // Copy file
             if (!CopyFileA(srcPath, dstPath, FALSE)) {
-               DbgPrint("Failed to copy file: %s -> %s\n", srcPath, dstPath);
+               debug_printf("Failed to copy file: %s -> %s\n", srcPath, dstPath);
             }
         }
 
