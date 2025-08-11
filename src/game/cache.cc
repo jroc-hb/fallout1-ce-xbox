@@ -8,6 +8,7 @@
 #include "int/sound.h"
 #include "plib/gnw/debug.h"
 #include "plib/gnw/memory.h"
+#include "plib/gnw/debug.h"
 
 namespace fallout {
 
@@ -117,10 +118,12 @@ bool cache_lock(Cache* cache, int key, void** data, CacheEntry** cacheEntryPtr)
     } else if (rc == 3) {
         // New cache entry is required.
         if (cache->entriesLength >= INT_MAX) {
+            debug_printf("cache_lock: cache is full, cannot create new entry for key %d\n", key);
             return false;
         }
 
         if (!cache_add(cache, key, &index)) {
+            debug_printf("cache_lock: cache_add failed for key %d\n", key);
             return false;
         }
 
@@ -135,6 +138,7 @@ bool cache_lock(Cache* cache, int key, void** data, CacheEntry** cacheEntryPtr)
     CacheEntry* cacheEntry = cache->entries[index];
     if (cacheEntry->referenceCount == 0) {
         if (!heap_lock(&(cache->heap), cacheEntry->heapHandleIndex, &(cacheEntry->data))) {
+            debug_printf("cache_lock: heap_lock failed for key %d\n", key);
             return false;
         }
     }
@@ -145,6 +149,7 @@ bool cache_lock(Cache* cache, int key, void** data, CacheEntry** cacheEntryPtr)
     cacheEntry->mru = cache->hits;
 
     if (cache->hits == UINT_MAX) {
+        debug_printf("cache_lock: resetting hits counter\n");
         cache_reset_counter(cache);
     }
 
@@ -364,16 +369,19 @@ static bool cache_add(Cache* cache, int key, int* indexPtr)
 
     // NOTE: Uninline.
     if (cache_create_item(&cacheEntry) != 1) {
+        debug_printf("cache_add: cache_create_item failed for key %d\n", key);
         return 0;
     }
 
     do {
         int size;
         if (cache->sizeProc(key, &size) != 0) {
+            debug_printf("cache_add: cache->sizeProc failed for key %d\n", key);
             break;
         }
 
         if (!cache_make_room(cache, size)) {
+            debug_printf("cache_add: cache_make_room failed for key %d\n", key);
             break;
         }
 
@@ -391,6 +399,7 @@ static bool cache_add(Cache* cache, int key, int* indexPtr)
             }
 
             if (!cache_make_room(cache, cacheEntrySize)) {
+                debug_printf("cache_add: cache_make_room failed for key %d with size %d\n", key, cacheEntrySize);
                 break;
             }
         }
@@ -412,10 +421,12 @@ static bool cache_add(Cache* cache, int key, int* indexPtr)
 
         do {
             if (!heap_lock(&(cache->heap), cacheEntry->heapHandleIndex, &(cacheEntry->data))) {
+                debug_printf("cache_add: heap_lock failed for key %d\n", key);
                 break;
             }
 
             if (cache->readProc(key, &size, cacheEntry->data) != 0) {
+                debug_printf("cache_add: cache->readProc failed for key %d\n", key);
                 break;
             }
 
@@ -435,11 +446,13 @@ static bool cache_add(Cache* cache, int key, int* indexPtr)
 
             if (isNewKey) {
                 if (cache_find(cache, key, indexPtr) != 3) {
+                    debug_printf("cache_add: cache_find failed for key %d\n", key);
                     break;
                 }
             }
 
             if (!cache_insert(cache, cacheEntry, *indexPtr)) {
+                debug_printf("cache_add: cache_insert failed for key %d\n", key);
                 break;
             }
 
@@ -515,7 +528,6 @@ static int cache_find(Cache* cache, int key, int* indexPtr)
     } else {
         *indexPtr = mid + 1;
     }
-
     return 3;
 }
 

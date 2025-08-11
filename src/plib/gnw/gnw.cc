@@ -256,18 +256,22 @@ int win_add(int x, int y, int width, int height, int color, int flags)
     Window* tmp;
 
     if (!GNW_win_init_flag) {
+        debug_printf("win_add: window system not initialized\n");
         return -1;
     }
 
     if (num_windows == MAX_WINDOW_COUNT) {
+        debug_printf("win_add: too many windows (%d)\n", num_windows);
         return -1;
     }
 
     if (width > rectGetWidth(&scr_size)) {
+        debug_printf("win_add: width %d is greater than screen width %d\n", width, rectGetWidth(&scr_size));
         return -1;
     }
 
     if (height > rectGetHeight(&scr_size)) {
+        debug_printf("win_add: height %d is greater than screen height %d\n", height, rectGetHeight(&scr_size));
         return -1;
     }
 
@@ -279,6 +283,7 @@ int win_add(int x, int y, int width, int height, int color, int flags)
     w->buffer = (unsigned char*)mem_malloc(width * height);
     if (w->buffer == NULL) {
         mem_free(w);
+        debug_printf("win_add: out of memory for window buffer\n");
         return -1;
     }
 
@@ -1106,10 +1111,12 @@ unsigned char* win_get_buf(int win)
     Window* w = GNW_find(win);
 
     if (!GNW_win_init_flag) {
+        debug_printf("\nwin_get_buf: GNW_win_init_flag is false\n");
         return NULL;
     }
 
     if (w == NULL) {
+        debug_printf("\nwin_get_buf: Window %d not found\n", win);
         return NULL;
     }
 
@@ -1168,10 +1175,12 @@ int win_get_rect(int win, Rect* rect)
     Window* w = GNW_find(win);
 
     if (!GNW_win_init_flag) {
+        debug_printf("\nwin_get_rect: GNW_win_init_flag is false\n");
         return -1;
     }
 
     if (w == NULL) {
+        debug_printf("\nwin_get_rect: Window %d not found\n", win);
         return -1;
     }
 

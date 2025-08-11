@@ -176,6 +176,7 @@ unsigned char* datafileLoadBlock(char* path, int* sizePtr)
     if (data == NULL) {
         // NOTE: This code is unreachable, mymalloc never fails.
         // Otherwise it leaks stream.
+        // NXDK TODO: See if this is causing problems
         *sizePtr = 0;
         return NULL;
     }
