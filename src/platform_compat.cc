@@ -256,28 +256,35 @@ int compat_close(int fileHandle)
 
 int compat_read(int fileHandle, void* buf, unsigned int size)
 {
-    debug_printf("compat_read: %s %d\n", fileHandle, size);
     FILE* fp = reinterpret_cast<FILE*>(fileHandle);
-    return fread(buf, 1, size, fp);
+    int bytesRead = fread(buf, 1, size, fp);
+    debug_printf("compat_read: handle=%d size=%u -> read=%d\n", fileHandle, size, bytesRead);
+    return bytesRead;
 }
 
 int compat_write(int fileHandle, const void* buf, unsigned int size)
 {
     FILE* fp = reinterpret_cast<FILE*>(fileHandle);
-    return fwrite(buf, 1, size, fp);
+    int bytesWritten = fwrite(buf, 1, size, fp);
+    debug_printf("compat_write: handle=%d size=%u -> written=%d\n", fileHandle, size, bytesWritten);
+    return bytesWritten;
 }
 
 long compat_lseek(int fileHandle, long offset, int origin)
 {
-    debug_printf("compat_lseek: %i\n", fileHandle);
     FILE* fp = reinterpret_cast<FILE*>(fileHandle);
-    return fseek(fp, offset, origin) == 0 ? ftell(fp) : -1;
+    long result = (fseek(fp, offset, origin) == 0) ? ftell(fp) : -1;
+    debug_printf("compat_lseek: handle=%d offset=%ld origin=%d -> position=%ld\n",
+                 fileHandle, offset, origin, result);
+    return result;
 }
 
 long compat_tell(int fileHandle)
 {
     FILE* fp = reinterpret_cast<FILE*>(fileHandle);
-    return ftell(fp);
+    long pos = ftell(fp);
+    debug_printf("compat_tell: handle=%d -> position=%ld\n", fileHandle, pos);
+    return pos;
 }
 
 long compat_filelength(int fileHandle)
@@ -300,8 +307,10 @@ int compat_mkdir(const char* path)
 
 #ifdef _WIN32
     #ifdef NXDK
-    debug_printf("compat_mkdir: %s\n", nativePath);
-    return CreateDirectoryA(nativePath, NULL);
+        int result = 0;
+        result = CreateDirectoryA(nativePath, NULL);
+        debug_printf("compat_mkdir: path=%s -> result=%d\n", nativePath, result);
+        return result;
     #else
     return mkdir(nativePath);
     #endif

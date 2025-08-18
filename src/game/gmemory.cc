@@ -5,11 +5,6 @@
 #include "plib/db/db.h"
 #include "plib/gnw/memory.h"
 
-#ifdef NXDK
-//debug logging
-#include <xboxkrnl/xboxkrnl.h>
-#endif
-
 namespace fallout {
 
 // 0x442E40

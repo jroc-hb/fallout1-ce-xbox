@@ -227,6 +227,10 @@ int gsound_init()
 
     int cacheSize;
     config_get_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_CACHE_SIZE_KEY, &cacheSize);
+#ifdef NXDK
+    debug_printf("Xbox build detected - forcing cache_size to 4096 bytes\n");
+    cacheSize = 4096;
+#endif
     if (cacheSize >= 0x40000) {
         debug_printf("\n!!! Config file needs adustment.  Please remove the ");
         debug_printf("cache_size line and run fallout again.  This will reset ");
@@ -1157,6 +1161,7 @@ int gsound_play_sfx_file_volume(const char* a1, int a2)
 // 0x448A0C
 Sound* gsound_load_sound(const char* name, Object* object)
 {
+    debug_printf("START: gsound_active_effect_counter = %d\n", gsound_active_effect_counter);
     if (!gsound_initialized) {
         return NULL;
     }
@@ -1173,6 +1178,7 @@ Sound* gsound_load_sound(const char* name, Object* object)
         if (gsound_debug) {
             debug_printf("failed because there are already %d active effects.\n", gsound_active_effect_counter);
         }
+        debug_printf("END FAIL: gsound_active_effect_counter = %d\n", gsound_active_effect_counter);
 
         return NULL;
     }
@@ -1182,6 +1188,7 @@ Sound* gsound_load_sound(const char* name, Object* object)
         if (gsound_debug) {
             debug_printf("failed.\n");
         }
+        debug_printf("END FAIL: gsound_active_effect_counter = %d\n", gsound_active_effect_counter);
 
         return NULL;
     }
@@ -1196,6 +1203,7 @@ Sound* gsound_load_sound(const char* name, Object* object)
             debug_printf("succeeded.\n");
         }
 
+        debug_printf("END SUCCESS: gsound_active_effect_counter = %d\n", gsound_active_effect_counter);
         return sound;
     }
 
@@ -1223,6 +1231,7 @@ Sound* gsound_load_sound(const char* name, Object* object)
                     debug_printf("succeeded (with alias).\n");
                 }
 
+                debug_printf("END SUCCESS: gsound_active_effect_counter = %d\n", gsound_active_effect_counter);
                 return sound;
             }
 
@@ -1238,6 +1247,7 @@ Sound* gsound_load_sound(const char* name, Object* object)
                         debug_printf("succeeded (with male alias).\n");
                     }
 
+                    debug_printf("END SUCCESS: gsound_active_effect_counter = %d\n", gsound_active_effect_counter);
                     return sound;
                 }
             }
@@ -1256,6 +1266,7 @@ Sound* gsound_load_sound(const char* name, Object* object)
                 debug_printf("succeeded (with alias).\n");
             }
 
+            debug_printf("END SUCCESS: gsound_active_effect_counter = %d\n", gsound_active_effect_counter);
             return sound;
         }
     }
@@ -1267,6 +1278,8 @@ Sound* gsound_load_sound(const char* name, Object* object)
     if (gsound_debug) {
         debug_printf("failed.\n");
     }
+
+    debug_printf("END FAIL: gsound_active_effect_counter = %d\n", gsound_active_effect_counter);
 
     return NULL;
 }

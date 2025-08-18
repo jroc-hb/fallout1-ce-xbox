@@ -13,6 +13,7 @@
 
 #ifdef NXDK
 #include <xboxkrnl/xboxkrnl.h>
+#include "game/gconfig.h"
 #endif
 
 namespace fallout {
@@ -23,6 +24,11 @@ static int debug_screen(char* string);
 static void debug_putc(int ch);
 static void debug_scroll();
 static void debug_exit(void);
+
+#ifdef NXDK
+static char* log_path = "E:\\UDATA\\FALLOUT1\\consolelog.txt";
+static int save_log_to_hdd = 0;
+#endif
 
 // 0x539D5C
 static FILE* fd = NULL;
@@ -39,6 +45,13 @@ static DebugFunc* debug_func = NULL;
 // 0x4B2D90
 void GNW_debug_init()
 {
+#ifdef NXDK
+    config_get_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_SAVE_LOG_TO_HDD_KEY, &save_log_to_hdd);
+    if (save_log_to_hdd) {
+        // Reset the log if it exists
+        compat_remove(log_path);
+    }
+#endif
     atexit(debug_exit);
 }
 
@@ -140,13 +153,23 @@ int debug_printf(const char* format, ...)
     va_start(args, format);
 
     int rc;
+    char string[260];
+    vsnprintf(string, sizeof(string), format, args);
 
 #ifdef NXDK
-        //debug logging in xemu
-        char string[260];
-        vsnprintf(string, sizeof(string), format, args);
+    // Debug logging in xemu
+    rc = DbgPrint(string);
+    DbgPrint("\n");
 
-        rc = DbgPrint(string);
+    if(save_log_to_hdd) {
+        // Append log to consolelog.txt on HDD
+        FILE *f = fopen(log_path, "a");
+        if (f) {
+            fputs(string, f);
+            fputc('\n', f);
+            fclose(f);
+        }
+    }
 #else
     if (debug_func != NULL) {
         char string[260];

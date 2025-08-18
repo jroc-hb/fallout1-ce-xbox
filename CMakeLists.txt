@@ -31,6 +31,9 @@ set(CMAKE_C_FLAGS_DEBUG "-g -Wall -Wextra")
 set(CMAKE_CXX_FLAGS_RELEASE "-Ofast")
 set(CMAKE_C_FLAGS_RELEASE "-Ofast")
 
+# Custom toggle for building with experimental hardware accelerated SDL2
+option(USE_PBKIT "Import PBKit for use with hardware accelerated SDL2" OFF)
+
 # Stop lots of warning spam
 add_compile_options(-Wno-builtin-macro-redefined)
 add_definitions(-DXBOX -DNXDK)
@@ -371,6 +374,7 @@ if((NOT ${CMAKE_SYSTEM_NAME} MATCHES "Linux") AND (NOT ${CMAKE_SYSTEM_NAME} MATC
 else()
     if(NXDK)
     pkg_search_module(SDL2 REQUIRED sdl2)
+    pkg_search_module(SDL2_TTF REQUIRED SDL2_ttf)
     else()
     find_package(SDL2)
     endif()
@@ -382,8 +386,14 @@ target_link_libraries(${EXECUTABLE_NAME} adecode::adecode)
 add_subdirectory("third_party/fpattern")
 target_link_libraries(${EXECUTABLE_NAME} fpattern::fpattern)
 
-target_link_libraries(${EXECUTABLE_NAME} ${SDL2_LIBRARIES})
-target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL2_INCLUDE_DIRS})
+if(USE_PBKIT)
+    message(STATUS "Importing PBKit for hardware accelerated SDL2 branch")
+    target_link_libraries(${EXECUTABLE_NAME} ${SDL2_LIBRARIES} ${SDL2_TTF_LIBRARIES} ${NXDK_DIR}/lib/libpbkit.lib)
+else()
+    message(STATUS "Importing default NXDK SDL2 libraries")
+    target_link_libraries(${EXECUTABLE_NAME} ${SDL2_LIBRARIES} ${SDL2_TTF_LIBRARIES})
+endif()
+target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL2_INCLUDE_DIRS} ${SDL2_TTF_INCLUDE_DIRS})
 
 if(APPLE)
     if(IOS)

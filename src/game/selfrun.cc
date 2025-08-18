@@ -11,11 +11,6 @@
 #include "plib/gnw/svga.h"
 #include "plib/gnw/vcr.h"
 
-#ifdef NXDK
-//debug logging
-#include <xboxkrnl/xboxkrnl.h>
-#endif
-
 namespace fallout {
 
 typedef enum SelfrunState {

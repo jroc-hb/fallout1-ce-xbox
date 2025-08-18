@@ -10,6 +10,8 @@ namespace fallout {
 
 #ifdef NXDK
 #define GAME_CONFIG_DISABLE_FMV_KEY "disable_fmv" 
+#define GAME_CONFIG_PERFORMANCE_OVERLAY_KEY "performance_overlay"
+#define GAME_CONFIG_SAVE_LOG_TO_HDD_KEY "save_log_to_hdd"
 #endif
 
 #define GAME_CONFIG_SYSTEM_KEY "system"

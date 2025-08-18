@@ -8,12 +8,26 @@
 #ifdef NXDK
 #include <hal/video.h>
 #include <hal/debug.h>
+#include <xboxkrnl/xboxkrnl.h>
+#include <SDL_ttf.h>
+#include "game/gconfig.h"
 #endif
 
 namespace fallout {
 
 static bool createRenderer(int width, int height);
 static void destroyRenderer();
+
+#ifdef NXDK
+// --- Debug overlay state ---
+static int performance_overlay = 0;
+static TTF_Font *debugFont = NULL;
+static Uint32 lastTime = 0;
+static int frameCount = 0;
+static int currentFPS = 0;
+static MM_STATISTICS mem_stats = {0};
+static DWORD last_updated = 0;
+#endif
 
 // screen rect
 Rect scr_size;
@@ -29,6 +43,80 @@ SDL_Surface* gSdlTextureSurface = NULL;
 
 // TODO: Remove once migration to update-render cycle is completed.
 FpsLimiter sharedFpsLimiter;
+
+#ifdef NXDK
+static void debug_update_fps(void) {
+    static int frameCount = 0;
+    static Uint32 lastTime = 0;
+
+    frameCount++;
+    Uint32 now = SDL_GetTicks();
+    if (now - lastTime >= 1000) {
+        currentFPS = frameCount;
+        frameCount = 0;
+        lastTime = now;
+    }
+}
+
+static void update_mem_stats_periodically(void) {
+    DWORD now = GetTickCount();
+    if ((last_updated == 0) || ((now - last_updated) > 1000)) {
+        last_updated = now;
+        memset(&mem_stats, 0, sizeof(mem_stats));
+        mem_stats.Length = sizeof(mem_stats);  // important
+        MmQueryStatistics(&mem_stats);
+    }
+}
+
+// Draw overlay text
+static void debug_draw_overlay(SDL_Renderer *renderer) {
+    if (!debugFont) return;
+
+    update_mem_stats_periodically();
+
+    char buf[128];
+    snprintf(buf, sizeof(buf), "FPS: %d  RAM: %d / %d MiB Free",
+        currentFPS,
+        mem_stats.AvailablePages >> 8,
+        mem_stats.TotalPhysicalPages >> 8);
+
+    SDL_Color neonPink = {255, 20, 147, 255};
+    SDL_Surface *textSurface = TTF_RenderText_Blended(debugFont, buf, neonPink);
+    if (!textSurface) return;
+
+    SDL_Texture *textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
+    SDL_FreeSurface(textSurface);
+    if (!textTexture) return;
+
+    // Background rect, slightly bigger than text for padding
+    SDL_Rect bgRect = {10 - 4, 10 - 2, textSurface->w + 8, textSurface->h + 4};
+
+    // Enable blending mode to allow transparency (optional here since alpha=255)
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+    // Draw solid black background (fully opaque)
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_RenderFillRect(renderer, &bgRect);
+
+    // Draw the neon pink text on top
+    SDL_Rect dst = {10, 10, textSurface->w, textSurface->h};
+    SDL_RenderCopy(renderer, textTexture, NULL, &dst);
+
+    SDL_DestroyTexture(textTexture);
+}
+
+// Call once at startup
+void debug_overlay_init(void) {
+    if (TTF_Init() == -1) {
+        debugPrint("TTF_Init failed: %s\n", TTF_GetError());
+        return;
+    }
+    debugFont = TTF_OpenFont("D:\\media\\font.ttf", 16); // change path to your font
+    if (!debugFont) {
+        debugPrint("Failed to load font: %s\n", TTF_GetError());
+    }
+}
+#endif
 
 // 0x4CB310
 void GNW95_SetPaletteEntries(unsigned char* palette, int start, int count)
@@ -110,6 +198,13 @@ bool svga_init(VideoOptions* video_options)
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
         return false;
     }
+
+#ifdef NXDK
+    config_get_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_PERFORMANCE_OVERLAY_KEY, &performance_overlay);
+    if (performance_overlay) {
+        debug_overlay_init();
+    }
+#endif
 
     #ifdef NXDK
     Uint32 windowFlags = SDL_WINDOW_FULLSCREEN;
@@ -261,6 +356,10 @@ void renderPresent()
     SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
+    if (performance_overlay) {
+        debug_update_fps();
+        debug_draw_overlay(gSdlRenderer);
+    }
     SDL_RenderPresent(gSdlRenderer);
 }
 

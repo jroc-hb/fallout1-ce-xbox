@@ -14,10 +14,6 @@
 #include "plib/gnw/grbuf.h"
 #include "plib/gnw/memory.h"
 
-#ifdef NXDK
-//debug logging
-#include <xboxkrnl/xboxkrnl.h>
-#endif
 
 namespace fallout {
 

@@ -111,6 +111,8 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
     config_set_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_OUTPUT_MAP_DATA_INFO_KEY, 0);
 #ifdef NXDK
     config_set_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_DISABLE_FMV_KEY, 0);
+    config_set_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_PERFORMANCE_OVERLAY_KEY, 0);
+    config_set_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_SAVE_LOG_TO_HDD_KEY, 0);
 #endif
 
     if (isMapper) {
