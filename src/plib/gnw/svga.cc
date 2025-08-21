@@ -191,8 +191,6 @@ bool svga_init(VideoOptions* video_options)
     }
 #endif
 
-    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
-
     debugPrint("Initializing the video");
 
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
