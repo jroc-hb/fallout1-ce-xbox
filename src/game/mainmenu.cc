@@ -92,6 +92,11 @@ static CacheEntry* button_down_key;
 // 0x612DE0
 static CacheEntry* background_key;
 
+#ifdef NXDK
+// Variable used for gamepad menu navigation
+static int menuIndex = 0;
+#endif
+
 // 0x472F80
 int main_menu_create()
 {
@@ -245,6 +250,9 @@ void main_menu_destroy()
     }
 
     main_menu_created = false;
+#ifdef NXDK
+    menuIndex = 0;
+#endif
 }
 
 // 0x473330
@@ -289,6 +297,7 @@ void main_menu_show(bool animate)
     }
 
     main_menu_is_hidden = false;
+    warp_mouse(438, 58);
 }
 
 // 0x4733BC
@@ -366,6 +375,17 @@ int main_menu_loop()
                 }
                 continue;
             }
+#ifdef NXDK
+            // Gamepad support: Navigate menu with D-Pad by warping the mouse cursor between buttons
+            if (keyCode == KEY_ARROW_DOWN || keyCode == KEY_ARROW_UP) {
+                if (keyCode == KEY_ARROW_DOWN) {
+                    menuIndex = (menuIndex + 1) % MAIN_MENU_BUTTON_COUNT;
+                } else {
+                    menuIndex = (menuIndex - 1 + MAIN_MENU_BUTTON_COUNT) % MAIN_MENU_BUTTON_COUNT;
+                }
+                warp_mouse_to_button(buttons[menuIndex]);
+            }
+#endif
         }
 
         if (keyCode == KEY_ESCAPE || game_user_wants_to_quit == 3) {

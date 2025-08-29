@@ -320,6 +320,11 @@ static int fontsave;
 // 0x612D8C
 static CacheEntry* grphkey[LOAD_SAVE_FRM_COUNT];
 
+#ifdef NXDK
+static int done_button;
+static int cancel_button;
+#endif
+
 // 0x46D954
 void InitLoadSave()
 {
@@ -983,7 +988,9 @@ int LoadGame(int mode)
     DrawInfoBox(slot_cursor);
     win_draw(lsgwin);
     dbleclkcntr = 24;
-
+#ifdef NXDK
+    warp_mouse_to_button(done_button);
+#endif
     int rc = -1;
     int doubleClickSlot = -1;
     while (rc == -1) {
@@ -1014,6 +1021,14 @@ int LoadGame(int mode)
                 selectionChanged = true;
                 doubleClickSlot = -1;
                 break;
+#ifdef NXDK
+            case KEY_ARROW_LEFT:
+                warp_mouse_to_button(done_button);
+                break;
+            case KEY_ARROW_RIGHT:
+                warp_mouse_to_button(cancel_button);
+                break;
+#endif
             case KEY_HOME:
                 slot_cursor = 0;
                 selectionChanged = true;
@@ -1430,6 +1445,10 @@ static int LSGameStart(int windowType)
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
     }
 
+    #ifdef NXDK
+        done_button = btn;
+    #endif
+
     btn = win_register_button(lsgwin,
         495,
         349,
@@ -1446,6 +1465,10 @@ static int LSGameStart(int windowType)
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
     }
+
+    #ifdef NXDK
+        cancel_button = btn;
+    #endif
 
     btn = win_register_button(lsgwin,
         35,

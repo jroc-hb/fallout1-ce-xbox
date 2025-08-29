@@ -11,6 +11,8 @@
 
 #ifdef NXDK
 #include "gamepad.hpp"
+#include "plib/gnw/button.h"
+#include "plib/gnw/debug.h"
 #endif
 namespace fallout {
 
@@ -707,6 +709,28 @@ void mouse_set_position(int x, int y)
     raw_x = x - mouse_hotx;
     mouse_clip();
 }
+
+#ifdef NXDK
+// Helper function to warp the cursor to an exact spot on the screen with no glitching
+void warp_mouse(int x, int y)
+{
+    int offsetX = (screenGetWidth() - 640) / 2;
+    int offsetY = (screenGetHeight() - 480) / 2;
+
+    mouse_hide();
+    mouse_set_position(x + offsetX, y + offsetY);
+    mouse_show();
+    debug_printf("Warped mouse to (%d, %d)\n", x, y);
+}
+
+// Takes a button ID and warps the mouse cursor to the center of that button
+void warp_mouse_to_button(int button)
+{
+    int button_x = win_get_button_center_x(button);
+    int button_y = win_get_button_center_y(button);
+    warp_mouse(button_x, button_y);
+}
+#endif
 
 // 0x4B52C0
 static void mouse_clip()

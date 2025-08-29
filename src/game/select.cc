@@ -196,6 +196,11 @@ static unsigned char* previous_button_up;
 // 0x664FE8
 static unsigned char* previous_button_down;
 
+#ifdef NXDK
+// Variable used for gamepad menu navigation
+static int menuIndex = 0;
+#endif
+
 // 0x495260
 int select_character()
 {
@@ -210,6 +215,11 @@ int select_character()
 
     loadColorTable("color.pal");
     palette_fade_to(cmap);
+
+#ifdef NXDK
+    warp_mouse_to_button(create_button);
+    menuIndex = create_button;
+#endif
 
     int rc = 0;
     bool done = false;
@@ -267,9 +277,45 @@ int select_character()
         case KEY_F10:
             game_quit_with_confirm();
             break;
+#ifdef NXDK
+        case KEY_ARROW_LEFT:
+            if (menuIndex == modify_button) {
+                menuIndex = next_button;
+                warp_mouse_to_button(next_button);
+            } else if (menuIndex == back_button) {
+                menuIndex = create_button;
+                warp_mouse_to_button(create_button);
+            } else if (menuIndex == next_button) {
+                menuIndex = previous_button;
+                warp_mouse_to_button(previous_button);
+            } else if (menuIndex == previous_button) {
+                menuIndex = take_button;
+                warp_mouse_to_button(take_button);
+            }
+            break;
+        case KEY_ARROW_UP:
+            if (menuIndex == create_button) {
+                menuIndex = take_button;
+                warp_mouse_to_button(take_button);
+            } else if (menuIndex == back_button) {
+                menuIndex = modify_button;
+                warp_mouse_to_button(modify_button);
+            }
+            break;
+        case KEY_ARROW_DOWN:
+            if (menuIndex == take_button) {
+                menuIndex = create_button;
+                warp_mouse_to_button(create_button);
+            } else if (menuIndex == modify_button) {
+                menuIndex = back_button;
+                warp_mouse_to_button(back_button);
+            }
+            break;
+#else
         case KEY_ARROW_LEFT:
             gsound_play_sfx_file("ib2p1xx1");
             // FALLTHROUGH
+#endif
         case 500:
             premade_index -= 1;
             if (premade_index < 0) {
@@ -278,9 +324,27 @@ int select_character()
 
             select_update_display();
             break;
+#ifdef NXDK
+        case KEY_ARROW_RIGHT:
+            if (menuIndex == take_button) {
+                menuIndex = previous_button;
+                warp_mouse_to_button(previous_button);
+            } else if (menuIndex == create_button) {
+                menuIndex = back_button;
+                warp_mouse_to_button(back_button);
+            } else if (menuIndex == previous_button) {
+                menuIndex = next_button;
+                warp_mouse_to_button(next_button);
+            } else if (menuIndex == next_button) {
+                menuIndex = modify_button;
+                warp_mouse_to_button(modify_button);
+            }
+            break;
+#else
         case KEY_ARROW_RIGHT:
             gsound_play_sfx_file("ib2p1xx1");
             // FALLTHROUGH
+#endif
         case 501:
             premade_index += 1;
             if (premade_index >= premade_total) {

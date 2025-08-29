@@ -1236,4 +1236,22 @@ int win_button_press_and_release(int btn)
     return 0;
 }
 
+#ifdef NXDK
+int win_get_button_center_x(int btn) {
+    Button* b = GNW_find_button(btn, NULL);
+    if (b != NULL) {
+        return (b->rect.ulx + b->rect.lrx) / 2;
+    }
+    return 0;
+}
+
+int win_get_button_center_y(int btn) {
+    Button* b = GNW_find_button(btn, NULL);
+    if (b != NULL) {
+        return (b->rect.uly + b->rect.lry) / 2;
+    }
+    return 0;
+}
+#endif
+
 } // namespace fallout

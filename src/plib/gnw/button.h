@@ -28,6 +28,10 @@ int win_group_check_buttons(int buttonCount, int* btns, int maxChecked, RadioBut
 int win_group_radio_buttons(int buttonCount, int* btns);
 void GNW_button_refresh(Window* window, Rect* rect);
 int win_button_press_and_release(int btn);
+#ifdef NXDK
+int win_get_button_center_x(int btn);
+int win_get_button_center_y(int btn);
+#endif
 
 } // namespace fallout
 

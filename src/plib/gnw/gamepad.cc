@@ -333,13 +333,13 @@ void HandleControllerButtonUp(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: // Skilldex (S)
-        simulatedKeyboardKey = {SDL_SCANCODE_S, 0};
+    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: // Menu/Map Left (Left Arrow)
+        simulatedKeyboardKey = {SDL_SCANCODE_LEFT, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: // Quick Save (F6)
-        simulatedKeyboardKey = {SDL_SCANCODE_F6, 0};
+    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: // Menu/Map Right (Right Arrow)
+        simulatedKeyboardKey = {SDL_SCANCODE_RIGHT, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -401,7 +401,7 @@ void HandleControllerButtonDown(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_UP: // Menu/Map Uo (Up Arrow)
+    case SDL_CONTROLLER_BUTTON_DPAD_UP: // Menu/Map Up (Up Arrow)
         simulatedKeyboardKey = {SDL_SCANCODE_UP, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
@@ -411,13 +411,13 @@ void HandleControllerButtonDown(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: // Skilldex (S)
-        simulatedKeyboardKey = {SDL_SCANCODE_S, 1};
+    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: // Menu/Map Right (Right Arrow)
+        simulatedKeyboardKey = {SDL_SCANCODE_LEFT, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: // Quick Save (F6)
-        simulatedKeyboardKey = {SDL_SCANCODE_F6, 1};
+    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: // Menu/Map Right (Right Arrow)
+        simulatedKeyboardKey = {SDL_SCANCODE_RIGHT, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 

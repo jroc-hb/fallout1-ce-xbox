@@ -346,6 +346,9 @@ FILE* compat_fopen(const char* path, const char* mode)
     if (strcmp(mode, "rt") == 0) {
         // NXDK seemingly doesn't support "rt" mode, so we use "rb" instead
         fp = fopen(nativePath, "rb");
+    } else if (strcmp(mode, "wt") == 0) {
+        // NXDK seemingly doesn't support "wt" mode, so we use "wb" instead
+        fp = fopen(nativePath, "wb");
     } else {
         fp = fopen(nativePath, mode);
     }

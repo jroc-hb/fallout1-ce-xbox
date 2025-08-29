@@ -215,7 +215,7 @@ long audiofSeek(int fileHandle, long offset, int origin)
             if (remaining != 0) {
                 audiofRead(fileHandle, buf, remaining);
             }
-            // TODO: Obiously leaks memory.
+            myfree(buf, __FILE__, __LINE__);
         }
         return audioFile->position;
     }
