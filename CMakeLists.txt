@@ -21,6 +21,7 @@ project(${EXECUTABLE_NAME})
 
 if (NXDK) 
 include(FindPkgConfig)
+add_subdirectory(launcher)
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -417,7 +418,7 @@ endif()
 if (NXDK)
     #Post-build exe to xbe conversion
     add_custom_target(cxbe_convert ALL
-        VERBATIM COMMAND "${CMAKE_COMMAND}" -E env ./tools/cxbe/cxbe -OUT:${XBOX_ISO_DIR}/default.xbe -TITLE:${XBE_TITLE} ${CMAKE_CURRENT_BINARY_DIR}/${XBE_TITLE}.exe
+        VERBATIM COMMAND "${CMAKE_COMMAND}" -E env ./tools/cxbe/cxbe -OUT:${XBOX_ISO_DIR}/fallout1ce.xbe -TITLE:${XBE_TITLE} ${CMAKE_CURRENT_BINARY_DIR}/${XBE_TITLE}.exe
         WORKING_DIRECTORY ${NXDK_DIR}
         COMMENT "CXBE Conversion: [EXE -> XBE]"
     )

@@ -96,6 +96,8 @@ static void EnsureFileCopy(const char* src, const char* dst) {
         BOOL ok = CopyFileA(src, dst, FALSE);
         DbgPrint("CopyFileA %s: %s\n", dst, ok ? "success" : "failed");
         assert(ok);
+    } else {
+        DbgPrint("EnsureFileCopy %s: %s\n", src, "exists");
     }
 }
 #endif

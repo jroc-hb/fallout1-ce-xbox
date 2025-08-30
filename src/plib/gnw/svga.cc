@@ -111,7 +111,7 @@ void debug_overlay_init(void) {
         debugPrint("TTF_Init failed: %s\n", TTF_GetError());
         return;
     }
-    debugFont = TTF_OpenFont("D:\\media\\font.ttf", 16); // change path to your font
+    debugFont = TTF_OpenFont("D:\\assets\\r_fallouty.ttf", 16); // change path to your font
     if (!debugFont) {
         debugPrint("Failed to load font: %s\n", TTF_GetError());
     }
