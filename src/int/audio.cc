@@ -120,6 +120,10 @@ int audioOpen(const char* fname, int flags)
     if (compression == 2) {
         audioFile->flags |= AUDIO_FILE_COMPRESSED;
         audioFile->audioDecoder = Create_AudioDecoder(decodeRead, audioFile->stream, &(audioFile->channels), &(audioFile->sampleRate), &(audioFile->fileSize));
+        if (audioFile->audioDecoder == NULL) {
+            db_fclose(stream);
+            return -1;
+        }
         audioFile->fileSize *= 2;
     } else {
         audioFile->fileSize = db_filelength(stream);
@@ -185,11 +189,25 @@ long audioSeek(int fileHandle, long offset, int origin)
         assert(false && "Should be unreachable");
     }
 
+    if (pos < 0) {
+        pos = 0;
+    }
+    if (pos > audioFile->fileSize) {
+        pos = audioFile->fileSize;
+    }
+
     if ((audioFile->flags & AUDIO_FILE_COMPRESSED) != 0) {
         if (pos < audioFile->position) {
             AudioDecoder_Close(audioFile->audioDecoder);
             db_fseek(audioFile->stream, 0, SEEK_SET);
             audioFile->audioDecoder = Create_AudioDecoder(decodeRead, audioFile->stream, &(audioFile->channels), &(audioFile->sampleRate), &(audioFile->fileSize));
+            if (audioFile->audioDecoder == NULL) {
+                // Decoder reinitialization failed, reset to beginning to prevent crashes
+                audioFile->position = 0;
+                audioFile->fileSize = 0;
+                audioFile->flags &= ~AUDIO_FILE_COMPRESSED;
+                return audioFile->position;
+            }
             audioFile->position = 0;
             audioFile->fileSize *= 2;
 
@@ -208,7 +226,7 @@ long audioSeek(int fileHandle, long offset, int origin)
             }
         } else {
             buf = (unsigned char*)mymalloc(1024, __FILE__, __LINE__); // "..\int\audio.c", 321
-            v10 = audioFile->position - pos;
+            v10 = pos - audioFile->position;
             while (v10 > 1024) {
                 v10 -= 1024;
                 audioRead(fileHandle, buf, 1024);
@@ -218,7 +236,7 @@ long audioSeek(int fileHandle, long offset, int origin)
                 audioRead(fileHandle, buf, v10);
             }
 
-            // TODO: Probably leaks memory.
+            myfree(buf, __FILE__, __LINE__);
         }
 
         return audioFile->position;
