@@ -201,13 +201,15 @@ long audioSeek(int fileHandle, long offset, int origin)
             AudioDecoder_Close(audioFile->audioDecoder);
             db_fseek(audioFile->stream, 0, SEEK_SET);
             audioFile->audioDecoder = Create_AudioDecoder(decodeRead, audioFile->stream, &(audioFile->channels), &(audioFile->sampleRate), &(audioFile->fileSize));
+            
+            // If decoder creation failed, disable compression and fall back to uncompressed seeking
             if (audioFile->audioDecoder == NULL) {
-                // Decoder reinitialization failed, reset to beginning to prevent crashes
-                audioFile->position = 0;
-                audioFile->fileSize = 0;
                 audioFile->flags &= ~AUDIO_FILE_COMPRESSED;
-                return audioFile->position;
+                audioFile->fileSize = db_filelength(audioFile->stream);
+                audioFile->position = 0;
+                return db_fseek(audioFile->stream, pos, SEEK_SET);
             }
+            
             audioFile->position = 0;
             audioFile->fileSize *= 2;
 
