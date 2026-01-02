@@ -201,6 +201,7 @@ long audiofSeek(int fileHandle, long offset, int origin)
         if (a4 <= audioFile->position) {
             AudioDecoder_Close(audioFile->audioDecoder);
             fseek(audioFile->stream, 0, SEEK_SET);
+            clearerr(audioFile->stream);
             audioFile->audioDecoder = Create_AudioDecoder(decodeRead, audioFile->stream, &(audioFile->channels), &(audioFile->sampleRate), &(audioFile->fileSize));
             
             // If decoder creation failed, disable compression and fall back to uncompressed seeking
@@ -213,6 +214,12 @@ long audiofSeek(int fileHandle, long offset, int origin)
             
             audioFile->fileSize *= 2;
             audioFile->position = 0;
+            
+            // After reinitializing decoder, just return position 0
+            // Don't try to skip ahead - let normal reads handle it
+            if (a4 == 0) {
+                return audioFile->position;
+            }
 
             if (a4) {
                 buf = mymalloc(4096, __FILE__, __LINE__); // "..\int\audiof.c", 363

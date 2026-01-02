@@ -213,6 +213,12 @@ long audioSeek(int fileHandle, long offset, int origin)
             audioFile->position = 0;
             audioFile->fileSize *= 2;
 
+            // After reinitializing decoder, just return position 0 if seeking to start
+            // Don't try to skip ahead - let normal reads handle it
+            if (pos == 0) {
+                return audioFile->position;
+            }
+
             if (pos != 0) {
                 buf = (unsigned char*)mymalloc(4096, __FILE__, __LINE__); // "..\int\audio.c", 361
                 while (pos > 4096) {
