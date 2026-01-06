@@ -59,6 +59,7 @@ An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much 
 
 # Build Instructions
 - Install and set up NXDK https://github.com/XboxDev/nxdk
+- Also make sure you have `pkgconf` installed (`sudo apt install pkgconf` on Ubuntu)
 - I personally use WSL Ubuntu 22.04.5 on Windows 11 for NXDK stuff
 - Clone this repo
 - Copy the following files from your Fallout 1 install to the fallout-ce folder in this repo
