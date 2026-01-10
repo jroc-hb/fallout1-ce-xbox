@@ -625,6 +625,14 @@ static unsigned char free_perk;
 // 0x56ED2E
 static unsigned char first_skill_list;
 
+#ifdef NXDK
+// Button IDs for NXDK arrow navigation (bottom action buttons)
+static int editor_print_btn = -1;
+static int editor_done_btn = -1;
+static int editor_cancel_btn = -1;
+static int editor_nav_state = 0; // 0=Print, 1=Done, 2=Cancel
+#endif
+
 // 0x42C40C
 int editor_design(bool isCreationMode)
 {
@@ -659,6 +667,23 @@ int editor_design(bool isCreationMode)
 
         frame_time = get_time();
         int keyCode = get_input();
+
+#ifdef NXDK
+        // NXDK: allow left/right dpad or plus/minus to cycle bottom action buttons
+        if (keyCode == KEY_ARROW_RIGHT || keyCode == KEY_PLUS) {
+            editor_nav_state = (editor_nav_state + 1) % 3;
+            int btn = editor_nav_state == 0 ? editor_print_btn : (editor_nav_state == 1 ? editor_done_btn : editor_cancel_btn);
+            if (btn != -1) {
+                warp_mouse_to_button(btn);
+            }
+        } else if (keyCode == KEY_ARROW_LEFT || keyCode == KEY_MINUS) {
+            editor_nav_state = (editor_nav_state + 2) % 3;
+            int btn = editor_nav_state == 0 ? editor_print_btn : (editor_nav_state == 1 ? editor_done_btn : editor_cancel_btn);
+            if (btn != -1) {
+                warp_mouse_to_button(btn);
+            }
+        }
+#endif
 
         bool done = false;
         if (keyCode == 500) {
@@ -1337,6 +1362,9 @@ static int CharEditStart()
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+        editor_print_btn = btn;
+#endif
     }
 
     btn = win_register_button(
@@ -1355,6 +1383,9 @@ static int CharEditStart()
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+        editor_cancel_btn = btn;
+#endif
     }
 
     btn = win_register_button(
@@ -1373,7 +1404,17 @@ static int CharEditStart()
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+        editor_done_btn = btn;
+#endif
     }
+#ifdef NXDK
+    // Start navigation focused on Done by default
+    editor_nav_state = 1;
+    if (editor_done_btn != -1) {
+        warp_mouse_to_button(editor_done_btn);
+    }
+#endif
 
     win_draw(edit_win);
     disable_box_bar_win();

@@ -519,6 +519,17 @@ static int talkOldFont;
 // 0x58DAC8
 static GameDialogBlock dialogBlock;
 
+#ifdef NXDK
+// Variable used for gamepad dialog option navigation
+static int optionIndex = 0;
+// Menu navigation state: 0 = dialog options, 1 = barter/about buttons, 2 = review button, 3 = barter offer/talk, 4 = review done
+static int dialogMenuState = 0;
+// When in barter/about state: 0 = barter, 1 = about
+static int sideMenuIndex = 0;
+// When in barter offer/talk state: 0 = offer, 1 = talk
+static int barterMenuIndex = 0;
+#endif
+
 // 0x5951AC
 static CacheEntry* upper_hi_key;
 
@@ -1269,6 +1280,22 @@ static int gDialogProcess()
 
     gDialogProcessUpdate();
 
+#ifdef NXDK
+    optionIndex = 0;
+    dialogMenuState = 0;
+    sideMenuIndex = 0;
+    // Warp mouse to first dialogue option when menu loads
+    if (gdNumOptions > 0) {
+        GameDialogOptionEntry* firstOption = &(dialogBlock.options[0]);
+        int optionsWindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2 + GAME_DIALOG_OPTIONS_WINDOW_X;
+        int optionsWindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_OPTIONS_WINDOW_Y;
+        int optionY = firstOption->field_14;
+        int topRightX = optionsWindowX + GAME_DIALOG_OPTIONS_WINDOW_WIDTH - 15;
+        int topRightY = optionsWindowY + optionY;
+        warp_mouse(topRightX, topRightY);
+    }
+#endif
+
     int v18 = 0;
     if (dialogBlock.offset != 0) {
         v18 = 1;
@@ -1395,6 +1422,125 @@ static int gDialogProcess()
             }
         }
 
+#ifdef NXDK
+        // Gamepad support: Navigate with arrow keys between dialog options and side buttons
+        if (keyCode == KEY_ARROW_UP || keyCode == KEY_ARROW_DOWN || keyCode == KEY_ARROW_LEFT || keyCode == KEY_ARROW_RIGHT) {
+            if (dialogMenuState == 0) {
+                // Dialog options navigation
+                if (keyCode == KEY_ARROW_DOWN || keyCode == KEY_ARROW_UP) {
+                    if (gdNumOptions > 0) {
+                        if (keyCode == KEY_ARROW_DOWN) {
+                            optionIndex = (optionIndex + 1) % gdNumOptions;
+                        } else {
+                            optionIndex = (optionIndex - 1 + gdNumOptions) % gdNumOptions;
+                        }
+                        
+                        // Calculate screen coordinates for the selected option
+                        GameDialogOptionEntry* selectedOption = &(dialogBlock.options[optionIndex]);
+                        int optionsWindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2 + GAME_DIALOG_OPTIONS_WINDOW_X;
+                        int optionsWindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_OPTIONS_WINDOW_Y;
+                        
+                        // Get the y position of the selected option
+                        int optionY = selectedOption->field_14;
+                        
+                        // Position mouse at top right of the option
+                        int topRightX = optionsWindowX + GAME_DIALOG_OPTIONS_WINDOW_WIDTH - 15;
+                        int topRightY = optionsWindowY + optionY;
+                        warp_mouse(topRightX, topRightY);
+                    }
+                } else if (keyCode == KEY_ARROW_RIGHT) {
+                    // Switch to barter/about buttons
+                    dialogMenuState = 1;
+                    sideMenuIndex = 0;
+                    // Warp to Barter button
+                    int dialogSubwindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2;
+                    int dialogSubwindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_WINDOW_HEIGHT - dialogue_subwin_len;
+                    int barterX = dialogSubwindowX + 593 + 7;
+                    int barterY = dialogSubwindowY + 41 + 7;
+                    warp_mouse(barterX, barterY);
+                } else if (keyCode == KEY_ARROW_LEFT) {
+                    // Switch to review button
+                    dialogMenuState = 2;
+                    int dialogSubwindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2;
+                    int dialogSubwindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_WINDOW_HEIGHT - dialogue_subwin_len;
+                    int reviewX = dialogSubwindowX + 13 + 25;
+                    int reviewY = dialogSubwindowY + 154 + 14;
+                    warp_mouse(reviewX, reviewY);
+                }
+            } else if (dialogMenuState == 1) {
+                // Barter/About buttons navigation
+                if (keyCode == KEY_ARROW_DOWN || keyCode == KEY_ARROW_UP) {
+                    if (keyCode == KEY_ARROW_DOWN) {
+                        sideMenuIndex = (sideMenuIndex + 1) % 2;
+                    } else {
+                        sideMenuIndex = (sideMenuIndex - 1 + 2) % 2;
+                    }
+                    int dialogSubwindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2;
+                    int dialogSubwindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_WINDOW_HEIGHT - dialogue_subwin_len;
+                    
+                    if (sideMenuIndex == 0) {
+                        // Barter button at (593, 41, 14, 14)
+                        int barterX = dialogSubwindowX + 593 + 7;
+                        int barterY = dialogSubwindowY + 41 + 7;
+                        warp_mouse(barterX, barterY);
+                    } else {
+                        // About button at (593, 116, 14, 14)
+                        int aboutX = dialogSubwindowX + 593 + 7;
+                        int aboutY = dialogSubwindowY + 116 + 7;
+                        warp_mouse(aboutX, aboutY);
+                    }
+                } else if (keyCode == KEY_ARROW_LEFT) {
+                    // Switch back to dialog options
+                    dialogMenuState = 0;
+                    if (gdNumOptions > 0) {
+                        GameDialogOptionEntry* selectedOption = &(dialogBlock.options[optionIndex]);
+                        int optionsWindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2 + GAME_DIALOG_OPTIONS_WINDOW_X;
+                        int optionsWindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_OPTIONS_WINDOW_Y;
+                        int optionY = selectedOption->field_14;
+                        int topRightX = optionsWindowX + GAME_DIALOG_OPTIONS_WINDOW_WIDTH - 15;
+                        int topRightY = optionsWindowY + optionY;
+                        warp_mouse(topRightX, topRightY);
+                    }
+                } else if (keyCode == KEY_ARROW_RIGHT) {
+                    // Switch to review button
+                    dialogMenuState = 2;
+                    int dialogSubwindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2;
+                    int dialogSubwindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_WINDOW_HEIGHT - dialogue_subwin_len;
+                    int reviewX = dialogSubwindowX + 13 + 25;
+                    int reviewY = dialogSubwindowY + 154 + 14;
+                    warp_mouse(reviewX, reviewY);
+                }
+            } else if (dialogMenuState == 2) {
+                // Review button (only left/right navigation)
+                if (keyCode == KEY_ARROW_RIGHT) {
+                    // Switch to dialog options
+                    dialogMenuState = 0;
+                    optionIndex = 0;
+                    if (gdNumOptions > 0) {
+                        GameDialogOptionEntry* selectedOption = &(dialogBlock.options[0]);
+                        int optionsWindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2 + GAME_DIALOG_OPTIONS_WINDOW_X;
+                        int optionsWindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_OPTIONS_WINDOW_Y;
+                        int optionY = selectedOption->field_14;
+                        int topRightX = optionsWindowX + GAME_DIALOG_OPTIONS_WINDOW_WIDTH - 15;
+                        int topRightY = optionsWindowY + optionY;
+                        warp_mouse(topRightX, topRightY);
+                    }
+                } else if (keyCode == KEY_ARROW_LEFT) {
+                    // Switch to barter/about buttons
+                    dialogMenuState = 1;
+                    sideMenuIndex = 0;
+                    int dialogSubwindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2;
+                    int dialogSubwindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_WINDOW_HEIGHT - dialogue_subwin_len;
+                    int barterX = dialogSubwindowX + 593 + 7;
+                    int barterY = dialogSubwindowY + 41 + 7;
+                    warp_mouse(barterX, barterY);
+                }
+            } else if (dialogMenuState == 4) {
+                // Review done button (no navigation needed)
+            }
+        }
+#endif
+
         renderPresent();
         sharedFpsLimiter.throttle();
     }
@@ -1406,6 +1552,13 @@ static int gDialogProcess()
             return -1;
         }
     }
+
+#ifdef NXDK
+    optionIndex = 0;
+    dialogMenuState = 0;
+    sideMenuIndex = 0;
+    barterMenuIndex = 0;
+#endif
 
     return 0;
 }
@@ -2423,6 +2576,14 @@ static int gdialog_review_init(int* win)
         return -1;
     }
 
+#ifdef NXDK
+    // Initialize review menu state and warp to Done button
+    dialogMenuState = 4;
+    int doneBtnCenterX = reviewWindowX + 499 + (reviewFidWids[GAME_DIALOG_REVIEW_WINDOW_BUTTON_DONE] / 2);
+    int doneBtnCenterY = 398 + (reviewFidLens[GAME_DIALOG_REVIEW_WINDOW_BUTTON_DONE] / 2);
+    warp_mouse(doneBtnCenterX, doneBtnCenterY);
+#endif
+
     return 0;
 }
 
@@ -2452,6 +2613,22 @@ static int gdialog_review_exit(int* win)
 
     win_delete(*win);
     *win = -1;
+
+#ifdef NXDK
+    // Reset dialog menu state when exiting review screen
+    dialogMenuState = 0;
+    optionIndex = 0;
+    // Warp mouse to first dialogue option
+    if (gdNumOptions > 0) {
+        GameDialogOptionEntry* firstOption = &(dialogBlock.options[0]);
+        int optionsWindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2 + GAME_DIALOG_OPTIONS_WINDOW_X;
+        int optionsWindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_OPTIONS_WINDOW_Y;
+        int optionY = firstOption->field_14;
+        int topRightX = optionsWindowX + GAME_DIALOG_OPTIONS_WINDOW_WIDTH - 15;
+        int topRightY = optionsWindowY + optionY;
+        warp_mouse(topRightX, topRightY);
+    }
+#endif
 
     return 0;
 }
@@ -2811,6 +2988,16 @@ static int talk_to_create_barter_win()
 
     barterer_temp_obj->flags |= OBJECT_HIDDEN | OBJECT_NO_SAVE;
     barterer_temp_obj->sid = -1;
+
+#ifdef NXDK
+    // Initialize barter menu state and warp to Offer button
+    dialogMenuState = 3;
+    barterMenuIndex = 0;
+    int offerX = barterWindowX + 41 + 7;
+    int offerY = barterWindowY + 163 + 7;
+    warp_mouse(offerX, offerY);
+#endif
+
     return 0;
 }
 
@@ -2845,6 +3032,23 @@ static void talk_to_destroy_barter_win()
         win_delete(dialogueWindow);
         dialogueWindow = -1;
     }
+
+#ifdef NXDK
+    // Reset dialog menu state when exiting barter screen
+    dialogMenuState = 0;
+    barterMenuIndex = 0;
+    optionIndex = 0;
+    // Warp mouse to first dialogue option
+    if (gdNumOptions > 0) {
+        GameDialogOptionEntry* firstOption = &(dialogBlock.options[0]);
+        int optionsWindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2 + GAME_DIALOG_OPTIONS_WINDOW_X;
+        int optionsWindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_OPTIONS_WINDOW_Y;
+        int optionY = firstOption->field_14;
+        int topRightX = optionsWindowX + GAME_DIALOG_OPTIONS_WINDOW_WIDTH - 15;
+        int topRightY = optionsWindowY + optionY;
+        warp_mouse(topRightX, topRightY);
+    }
+#endif
 }
 
 // 0x440DE4
@@ -3806,6 +4010,22 @@ static void about_exit()
         about_win = -1;
 
         text_font(about_old_font);
+
+#ifdef NXDK
+        // Reset dialog menu state when exiting about screen
+        dialogMenuState = 0;
+        optionIndex = 0;
+        // Warp mouse to first dialogue option
+        if (gdNumOptions > 0) {
+            GameDialogOptionEntry* firstOption = &(dialogBlock.options[0]);
+            int optionsWindowX = (screenGetWidth() - GAME_DIALOG_WINDOW_WIDTH) / 2 + GAME_DIALOG_OPTIONS_WINDOW_X;
+            int optionsWindowY = (screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + GAME_DIALOG_OPTIONS_WINDOW_Y;
+            int optionY = firstOption->field_14;
+            int topRightX = optionsWindowX + GAME_DIALOG_OPTIONS_WINDOW_WIDTH - 15;
+            int topRightY = optionsWindowY + optionY;
+            warp_mouse(topRightX, topRightY);
+        }
+#endif
     }
 }
 

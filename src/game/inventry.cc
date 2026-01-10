@@ -4675,6 +4675,41 @@ void barter_inventory(int win, Object* a2, Object* a3, Object* a4, int a5)
                     gdialog_display_msg(messageListItem.text);
                 }
             }
+#ifdef NXDK
+        } else if (keyCode == KEY_ARROW_LEFT || keyCode == KEY_ARROW_RIGHT) {
+            // Gamepad support: Navigate between Offer and Talk buttons
+            static int barter_option = 0; // 0 = Offer (M), 1 = Talk (T)
+            if (keyCode == KEY_ARROW_RIGHT) {
+                barter_option = (barter_option + 1) % 2;
+            } else {
+                barter_option = (barter_option - 1 + 2) % 2;
+            }
+
+            // Try to get the dialogue window rect (win is dialogue window passed into this function)
+            Rect dialogRect;
+            if (win_get_rect(win, &dialogRect) == 0) {
+                // Exact button positions from talk_to_create_barter_win:
+                // OFFER at (41,163) size 14x14, TALK at (584,162) size 14x14 (relative to dialogue window)
+                int offerX = dialogRect.ulx + 41 + 7; // center of 14px button
+                int offerY = dialogRect.uly + 163 + 7;
+                int talkX = dialogRect.ulx + 584 + 7;
+                int talkY = dialogRect.uly + 162 + 7;
+
+                if (barter_option == 0) {
+                    warp_mouse(offerX, offerY);
+                } else {
+                    warp_mouse(talkX, talkY);
+                }
+            } else {
+                // Fallback approximation if we can't read the dialog rect
+                int buttonY = screenGetHeight() - 20; // Near bottom of screen
+                if (barter_option == 0) {
+                    warp_mouse(50, buttonY);
+                } else {
+                    warp_mouse(screenGetWidth() - 50, buttonY);
+                }
+            }
+#endif
         } else if (keyCode == KEY_ARROW_UP) {
             if (stack_offset[curr_stack] > 0) {
                 stack_offset[curr_stack] -= 1;
@@ -5196,6 +5231,61 @@ static int do_move_timer(int inventoryWindowType, Object* item, int max)
                 draw_amount(value, inventoryWindowType);
                 continue;
             }
+#ifdef NXDK
+            else if (keyCode == KEY_ARROW_UP || keyCode == KEY_ARROW_DOWN || keyCode == KEY_ARROW_LEFT || keyCode == KEY_ARROW_RIGHT) {
+                // Navigate Move Items overlay with arrow keys by warping mouse
+                // Cycle: Up=Done→All→Minus→Plus, Down=Done→Plus→Minus→All
+                // Left always goes to Done, Right always goes to Cancel
+                static int verticalState = 0; // 0=Done, 1=All, 2=Minus, 3=Plus
+
+                if (keyCode == KEY_ARROW_UP) {
+                    verticalState = (verticalState + 1) % 4; // Cycle forwards: Done→All→Minus→Plus
+                } else if (keyCode == KEY_ARROW_DOWN) {
+                    verticalState = (verticalState - 1 + 4) % 4; // Cycle backwards: Done←Plus←Minus←All
+                } else if (keyCode == KEY_ARROW_LEFT) {
+                    verticalState = 0; // Always go to Done
+                } else if (keyCode == KEY_ARROW_RIGHT) {
+                    // Right arrow warps to Cancel (not part of vertical cycle)
+                }
+
+                Rect mtRect;
+                if (win_get_rect(mt_wid, &mtRect) == 0) {
+                    // reproduce local x/y from setup_move_timer_win
+                    int x = (inventoryWindowType == INVENTORY_WINDOW_TYPE_MOVE_ITEMS) ? 200 : 194;
+                    int y = (inventoryWindowType == INVENTORY_WINDOW_TYPE_MOVE_ITEMS) ? 46 : 64;
+
+                    int plusX = mtRect.ulx + x + 8;     // plus button center (16x12)
+                    int plusY = mtRect.uly + y + 6;
+
+                    int minusX = mtRect.ulx + x + 8;    // minus button center (17x12)
+                    int minusY = mtRect.uly + y + 18;   // y + 12 + 6
+
+                    int allX = mtRect.ulx + 120 + 47;   // ALL button center (94x33)
+                    int allY = mtRect.uly + 80 + 16;
+
+                    int doneX = mtRect.ulx + 98 + 7;    // Done button center (15x16)
+                    int doneY = mtRect.uly + 128 + 8;
+
+                    int cancelX = mtRect.ulx + 148 + 7; // Cancel button center (15x16)
+                    int cancelY = mtRect.uly + 128 + 8;
+
+                    if (keyCode == KEY_ARROW_RIGHT) {
+                        warp_mouse(cancelX, cancelY);
+                    } else {
+                        // Warp to verticalState: 0=Done, 1=All, 2=Minus, 3=Plus
+                        if (verticalState == 0) {
+                            warp_mouse(doneX, doneY);
+                        } else if (verticalState == 1) {
+                            warp_mouse(allX, allY);
+                        } else if (verticalState == 2) {
+                            warp_mouse(minusX, minusY);
+                        } else if (verticalState == 3) {
+                            warp_mouse(plusX, plusY);
+                        }
+                    }
+                }
+            }
+#endif
         }
 
         renderPresent();
@@ -5358,6 +5448,17 @@ static int setup_move_timer_win(int inventoryWindowType, Object* item)
 
     win_draw(mt_wid);
     inven_set_mouse(INVENTORY_WINDOW_CURSOR_ARROW);
+
+    // Default focus: warp mouse to Done button when Move Items overlay opens
+    if (inventoryWindowType == INVENTORY_WINDOW_TYPE_MOVE_ITEMS) {
+        Rect mtRect;
+        if (win_get_rect(mt_wid, &mtRect) == 0) {
+            int doneX = mtRect.ulx + 98 + 7;   // Done button center (15x16)
+            int doneY = mtRect.uly + 128 + 8;
+            warp_mouse(doneX, doneY);
+        }
+    }
+
     text_font(oldFont);
 
     return 0;
