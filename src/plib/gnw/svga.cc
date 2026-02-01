@@ -541,12 +541,16 @@ int screenGetHeight()
 static bool createRenderer(int width, int height)
 {
 #ifdef NXDK
-    // IMPORTANT: On Xbox, we want to use the pbkit renderer directly
-    // Check if it's available by trying to create it
-    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED);
+    // Create renderer WITH VSYNC flag (TODO NXDK confirm this caps the framerate properl)
+    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, 
+                                      SDL_RENDERER_ACCELERATED | 
+                                      SDL_RENDERER_PRESENTVSYNC);
+    
     if (!gSdlRenderer) {
-        // Fall back to software
-        gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_SOFTWARE);
+        // Fallback to software with VSync
+        gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, 
+                                          SDL_RENDERER_SOFTWARE | 
+                                          SDL_RENDERER_PRESENTVSYNC);
     }
 #else
     gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, 0);
