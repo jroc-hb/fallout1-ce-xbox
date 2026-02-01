@@ -27,6 +27,12 @@ static int frameCount = 0;
 static int currentFPS = 0;
 static MM_STATISTICS mem_stats = {0};
 static DWORD last_updated = 0;
+
+// Xbox-specific optimization variables
+static SDL_Rect dirty_rect = {0, 0, 0, 0};
+static bool full_update = true;
+static bool palette_changed = false;
+static Uint8 current_palette[256 * 3] = {0}; // Track current palette for fades
 #endif
 
 // screen rect
@@ -45,10 +51,11 @@ SDL_Surface* gSdlTextureSurface = NULL;
 FpsLimiter sharedFpsLimiter;
 
 #ifdef NXDK
-static void debug_update_fps(void) {
-    static int frameCount = 0;
-    static Uint32 lastTime = 0;
+// ============================================
+// Xbox-specific optimizations
+// ============================================
 
+static void debug_update_fps(void) {
     frameCount++;
     Uint32 now = SDL_GetTicks();
     if (now - lastTime >= 1000) {
@@ -63,46 +70,57 @@ static void update_mem_stats_periodically(void) {
     if ((last_updated == 0) || ((now - last_updated) > 1000)) {
         last_updated = now;
         memset(&mem_stats, 0, sizeof(mem_stats));
-        mem_stats.Length = sizeof(mem_stats);  // important
+        mem_stats.Length = sizeof(mem_stats);
         MmQueryStatistics(&mem_stats);
     }
 }
 
-// Draw overlay text
+// Optimized debug overlay - cache textures
+static SDL_Texture* debug_overlay_texture = NULL;
+static char last_debug_text[128] = {0};
+
 static void debug_draw_overlay(SDL_Renderer *renderer) {
     if (!debugFont) return;
 
     update_mem_stats_periodically();
 
     char buf[128];
-    snprintf(buf, sizeof(buf), "FPS: %d  RAM: %d / %d MiB Free",
+    snprintf(buf, sizeof(buf), "FPS: %d  RAM: %d/%d MB",
         currentFPS,
         mem_stats.AvailablePages >> 8,
         mem_stats.TotalPhysicalPages >> 8);
 
-    SDL_Color neonPink = {255, 20, 147, 255};
-    SDL_Surface *textSurface = TTF_RenderText_Blended(debugFont, buf, neonPink);
-    if (!textSurface) return;
+    // Only recreate texture if text changed
+    if (strcmp(last_debug_text, buf) != 0 || !debug_overlay_texture) {
+        strcpy(last_debug_text, buf);
+        
+        if (debug_overlay_texture) {
+            SDL_DestroyTexture(debug_overlay_texture);
+            debug_overlay_texture = NULL;
+        }
+        
+        SDL_Color neonPink = {255, 20, 147, 255};
+        SDL_Surface *textSurface = TTF_RenderText_Blended(debugFont, buf, neonPink);
+        if (textSurface) {
+            debug_overlay_texture = SDL_CreateTextureFromSurface(renderer, textSurface);
+            SDL_FreeSurface(textSurface);
+        }
+    }
 
-    SDL_Texture *textTexture = SDL_CreateTextureFromSurface(renderer, textSurface);
-    SDL_FreeSurface(textSurface);
-    if (!textTexture) return;
-
-    // Background rect, slightly bigger than text for padding
-    SDL_Rect bgRect = {10 - 4, 10 - 2, textSurface->w + 8, textSurface->h + 4};
-
-    // Enable blending mode to allow transparency (optional here since alpha=255)
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-
-    // Draw solid black background (fully opaque)
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderFillRect(renderer, &bgRect);
-
-    // Draw the neon pink text on top
-    SDL_Rect dst = {10, 10, textSurface->w, textSurface->h};
-    SDL_RenderCopy(renderer, textTexture, NULL, &dst);
-
-    SDL_DestroyTexture(textTexture);
+    if (debug_overlay_texture) {
+        int w, h;
+        SDL_QueryTexture(debug_overlay_texture, NULL, NULL, &w, &h);
+        
+        // Draw background
+        SDL_Rect bgRect = {10 - 4, 10 - 2, w + 8, h + 4};
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+        SDL_RenderFillRect(renderer, &bgRect);
+        
+        // Draw text
+        SDL_Rect dst = {10, 10, w, h};
+        SDL_RenderCopy(renderer, debug_overlay_texture, NULL, &dst);
+    }
 }
 
 // Call once at startup
@@ -111,10 +129,71 @@ void debug_overlay_init(void) {
         debugPrint("TTF_Init failed: %s\n", TTF_GetError());
         return;
     }
-    debugFont = TTF_OpenFont("D:\\media\\font.ttf", 16); // change path to your font
+    debugFont = TTF_OpenFont("D:\\media\\font.ttf", 16);
     if (!debugFont) {
         debugPrint("Failed to load font: %s\n", TTF_GetError());
     }
+}
+
+// Optimized version for Xbox with proper dirty rectangle tracking
+void GNW95_ShowRect_Xbox(unsigned char* src, unsigned int srcPitch,
+                        unsigned int a3, unsigned int srcX, unsigned int srcY,
+                        unsigned int srcWidth, unsigned int srcHeight,
+                        unsigned int destX, unsigned int destY) {
+    // Copy to the 8-bit surface
+    buf_to_buf(src + srcPitch * srcY + srcX, srcWidth, srcHeight, srcPitch,
+               (unsigned char*)gSdlSurface->pixels + gSdlSurface->pitch * destY + destX,
+               gSdlSurface->pitch);
+    
+    // Update dirty rectangle - ALWAYS update when something is drawn
+    // This ensures fades work properly
+    if (!full_update) {
+        if (dirty_rect.w == 0) {
+            // First dirty rectangle
+            dirty_rect.x = static_cast<int>(destX);
+            dirty_rect.y = static_cast<int>(destY);
+            dirty_rect.w = static_cast<int>(srcWidth);
+            dirty_rect.h = static_cast<int>(srcHeight);
+        } else {
+            // Expand dirty rectangle to include new area
+            int x1 = (static_cast<int>(destX) < dirty_rect.x) ? static_cast<int>(destX) : dirty_rect.x;
+            int y1 = (static_cast<int>(destY) < dirty_rect.y) ? static_cast<int>(destY) : dirty_rect.y;
+            int x2 = (static_cast<int>(destX) + static_cast<int>(srcWidth) > dirty_rect.x + dirty_rect.w) ?
+                     static_cast<int>(destX) + static_cast<int>(srcWidth) : dirty_rect.x + dirty_rect.w;
+            int y2 = (static_cast<int>(destY) + static_cast<int>(srcHeight) > dirty_rect.y + dirty_rect.h) ?
+                     static_cast<int>(destY) + static_cast<int>(srcHeight) : dirty_rect.y + dirty_rect.h;
+            
+            dirty_rect.x = x1;
+            dirty_rect.y = y1;
+            dirty_rect.w = x2 - x1;
+            dirty_rect.h = y2 - y1;
+        }
+        
+        // Clamp to screen bounds
+        if (dirty_rect.x < 0) dirty_rect.x = 0;
+        if (dirty_rect.y < 0) dirty_rect.y = 0;
+        if (dirty_rect.x + dirty_rect.w > gSdlSurface->w) {
+            dirty_rect.w = gSdlSurface->w - dirty_rect.x;
+        }
+        if (dirty_rect.y + dirty_rect.h > gSdlSurface->h) {
+            dirty_rect.h = gSdlSurface->h - dirty_rect.y;
+        }
+    }
+    
+    // Also update the texture surface (needed for proper rendering)
+    SDL_Rect srcRect;
+    srcRect.x = static_cast<int>(destX);
+    srcRect.y = static_cast<int>(destY);
+    srcRect.w = static_cast<int>(srcWidth);
+    srcRect.h = static_cast<int>(srcHeight);
+    
+    SDL_Rect destRect;
+    destRect.x = static_cast<int>(destX);
+    destRect.y = static_cast<int>(destY);
+    destRect.w = static_cast<int>(srcWidth);
+    destRect.h = static_cast<int>(srcHeight);
+    
+    SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
 }
 #endif
 
@@ -130,10 +209,27 @@ void GNW95_SetPaletteEntries(unsigned char* palette, int start, int count)
                 colors[index].g = palette[index * 3 + 1] << 2;
                 colors[index].b = palette[index * 3 + 2] << 2;
                 colors[index].a = 255;
+                
+                // Store the palette for fade effects
+                #ifdef NXDK
+                if (start + index < 256) {
+                    current_palette[(start + index) * 3] = palette[index * 3];
+                    current_palette[(start + index) * 3 + 1] = palette[index * 3 + 1];
+                    current_palette[(start + index) * 3 + 2] = palette[index * 3 + 2];
+                }
+                #endif
             }
         }
 
         SDL_SetPaletteColors(gSdlSurface->format->palette, colors, start, count);
+        
+#ifdef NXDK
+        // Force full update when palette changes for fade effects
+        full_update = true;
+        palette_changed = true;
+#endif
+        
+        // Update the entire texture surface when palette changes
         SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
     }
 }
@@ -149,40 +245,79 @@ void GNW95_SetPalette(unsigned char* palette)
             colors[index].g = palette[index * 3 + 1] << 2;
             colors[index].b = palette[index * 3 + 2] << 2;
             colors[index].a = 255;
+            
+            // Store the palette for fade effects
+            #ifdef NXDK
+            current_palette[index * 3] = palette[index * 3];
+            current_palette[index * 3 + 1] = palette[index * 3 + 1];
+            current_palette[index * 3 + 2] = palette[index * 3 + 2];
+            #endif
         }
 
         SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
+        
+#ifdef NXDK
+        // Force full update when palette changes for fade effects
+        full_update = true;
+        palette_changed = true;
+#endif
+        
+        // Update the entire texture surface when palette changes
         SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
     }
 }
 
-// 0x4CB850
-void GNW95_ShowRect(unsigned char* src, unsigned int srcPitch, unsigned int a3, unsigned int srcX, unsigned int srcY, unsigned int srcWidth, unsigned int srcHeight, unsigned int destX, unsigned int destY)
+// Helper function for screen fades - applies brightness multiplier to palette
+static void ApplyPaletteBrightness(unsigned char* palette, float brightness) {
+    // brightness should be between 0.0 (black) and 1.0 (full)
+    brightness = (brightness < 0.0f) ? 0.0f : (brightness > 1.0f) ? 1.0f : brightness;
+    
+    unsigned char faded_palette[256 * 3];
+    
+    for (int i = 0; i < 256; i++) {
+        faded_palette[i * 3] = (unsigned char)(palette[i * 3] * brightness);
+        faded_palette[i * 3 + 1] = (unsigned char)(palette[i * 3 + 1] * brightness);
+        faded_palette[i * 3 + 2] = (unsigned char)(palette[i * 3 + 2] * brightness);
+    }
+    
+    GNW95_SetPalette(faded_palette);
+}
+
+// 0x4CB850 - Main blit function
+void GNW95_ShowRect(unsigned char* src, unsigned int srcPitch, unsigned int a3, 
+                   unsigned int srcX, unsigned int srcY, unsigned int srcWidth, 
+                   unsigned int srcHeight, unsigned int destX, unsigned int destY)
 {
-    buf_to_buf(src + srcPitch * srcY + srcX, srcWidth, srcHeight, srcPitch, (unsigned char*)gSdlSurface->pixels + gSdlSurface->pitch * destY + destX, gSdlSurface->pitch);
+#ifdef NXDK
+    GNW95_ShowRect_Xbox(src, srcPitch, a3, srcX, srcY, srcWidth, srcHeight, destX, destY);
+#else
+    buf_to_buf(src + srcPitch * srcY + srcX, srcWidth, srcHeight, srcPitch,
+               (unsigned char*)gSdlSurface->pixels + gSdlSurface->pitch * destY + destX,
+               gSdlSurface->pitch);
 
     SDL_Rect srcRect;
-    srcRect.x = destX;
-    srcRect.y = destY;
-    srcRect.w = srcWidth;
-    srcRect.h = srcHeight;
+    srcRect.x = static_cast<int>(destX);
+    srcRect.y = static_cast<int>(destY);
+    srcRect.w = static_cast<int>(srcWidth);
+    srcRect.h = static_cast<int>(srcHeight);
 
     SDL_Rect destRect;
-    destRect.x = destX;
-    destRect.y = destY;
+    destRect.x = static_cast<int>(destX);
+    destRect.y = static_cast<int>(destY);
+    destRect.w = static_cast<int>(srcWidth);
+    destRect.h = static_cast<int>(srcHeight);
+    
     SDL_BlitSurface(gSdlSurface, &srcRect, gSdlTextureSurface, &destRect);
+#endif
 }
 
 bool svga_init(VideoOptions* video_options)
 {
 #ifdef NXDK
     Sleep(1000);
-    // Based on LithiumX solution to detect Xbox resolution: 
-    // https://github.com/Ryzee119/LithiumX/blob/f4471d287d44abc84803d3b901bd4aa7ed459689/src/platform/xbox/platform.c#L99
-    // First try the user-specified resolution in f1_res.ini, then fall back to 480p
+    
     if (XVideoSetMode(video_options->width, video_options->height, 32, REFRESH_DEFAULT) == false)
     {
-        // Fall back to 640*480
         if (XVideoSetMode(640, 480, 32, REFRESH_DEFAULT))
         {
             video_options->width = 640;
@@ -204,15 +339,14 @@ bool svga_init(VideoOptions* video_options)
     }
 #endif
 
-    #ifdef NXDK
+#ifdef NXDK
     Uint32 windowFlags = SDL_WINDOW_FULLSCREEN;
-    #else
+#else
     Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI;
-
     if (video_options->fullscreen) {
         windowFlags |= SDL_WINDOW_FULLSCREEN;
     }
-    #endif
+#endif
 
     gSdlWindow = SDL_CreateWindow(GNW95_title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
         video_options->width * video_options->scale,
@@ -224,10 +358,8 @@ bool svga_init(VideoOptions* video_options)
 
     if (!createRenderer(video_options->width, video_options->height)) {
         destroyRenderer();
-
         SDL_DestroyWindow(gSdlWindow);
         gSdlWindow = NULL;
-
         return false;
     }
 
@@ -241,9 +373,9 @@ bool svga_init(VideoOptions* video_options)
         0);
     if (gSdlSurface == NULL) {
         destroyRenderer();
-
         SDL_DestroyWindow(gSdlWindow);
         gSdlWindow = NULL;
+        return false;
     }
 
     SDL_Color colors[256];
@@ -262,14 +394,27 @@ bool svga_init(VideoOptions* video_options)
     scr_size.lry = video_options->height - 1;
 
     mouse_blit_trans = NULL;
+    
+#ifdef NXDK
+    scr_blit = GNW95_ShowRect_Xbox;
+    mouse_blit = GNW95_ShowRect_Xbox;
+#else
     scr_blit = GNW95_ShowRect;
     mouse_blit = GNW95_ShowRect;
+#endif
 
     return true;
 }
 
 void svga_exit()
 {
+#ifdef NXDK
+    if (debug_overlay_texture) {
+        SDL_DestroyTexture(debug_overlay_texture);
+        debug_overlay_texture = NULL;
+    }
+#endif
+
     destroyRenderer();
 
     if (gSdlWindow != NULL) {
@@ -282,19 +427,30 @@ void svga_exit()
 
 int screenGetWidth()
 {
-    // TODO: Make it on par with _xres;
     return rectGetWidth(&scr_size);
 }
 
 int screenGetHeight()
 {
-    // TODO: Make it on par with _yres.
     return rectGetHeight(&scr_size);
 }
 
 static bool createRenderer(int width, int height)
 {
+#ifdef NXDK
+    // On Xbox, try to create an accelerated renderer first
+    for (int i = 0; i < 2; i++) {
+        int renderer_flags = (i == 0) ? SDL_RENDERER_ACCELERATED : SDL_RENDERER_SOFTWARE;
+        
+        gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, renderer_flags);
+        if (gSdlRenderer != NULL) {
+            break;
+        }
+    }
+#else
     gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, 0);
+#endif
+    
     if (gSdlRenderer == NULL) {
         return false;
     }
@@ -303,11 +459,22 @@ static bool createRenderer(int width, int height)
         return false;
     }
 
-#ifdef NXDK // NXDK TODO: See if this is optimal...
-    gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, width, height);
+    // Set render scale quality to nearest (fastest for pixel art)
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    
+#ifdef NXDK
+    // On Xbox, use streaming texture for better performance
+    gSdlTexture = SDL_CreateTexture(gSdlRenderer, 
+                                    SDL_PIXELFORMAT_ARGB8888, 
+                                    SDL_TEXTUREACCESS_STREAMING, 
+                                    width, height);
 #else
-    gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGB888, SDL_TEXTUREACCESS_STREAMING, width, height);
+    gSdlTexture = SDL_CreateTexture(gSdlRenderer, 
+                                    SDL_PIXELFORMAT_RGB888, 
+                                    SDL_TEXTUREACCESS_STREAMING, 
+                                    width, height);
 #endif
+    
     if (gSdlTexture == NULL) {
         return false;
     }
@@ -317,7 +484,8 @@ static bool createRenderer(int width, int height)
         return false;
     }
 
-    gSdlTextureSurface = SDL_CreateRGBSurfaceWithFormat(0, width, height, SDL_BITSPERPIXEL(format), format);
+    gSdlTextureSurface = SDL_CreateRGBSurfaceWithFormat(0, width, height, 
+                                                        SDL_BITSPERPIXEL(format), format);
     if (gSdlTextureSurface == NULL) {
         return false;
     }
@@ -351,14 +519,100 @@ void handleWindowSizeChanged()
 
 void renderPresent()
 {
-    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
+#ifdef NXDK
+    // Xbox-optimized rendering with fade support
+    debug_update_fps();
+    
+    if (full_update || palette_changed) {
+        // Full update needed (first frame, palette change, or fade effect)
+        SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, 
+                         gSdlTextureSurface->pitch);
+        full_update = false;
+        palette_changed = false;
+        dirty_rect.w = 0;
+        dirty_rect.h = 0;
+    } else if (dirty_rect.w > 0 && dirty_rect.h > 0) {
+        // Partial update for normal gameplay
+        SDL_UpdateTexture(gSdlTexture, &dirty_rect,
+                         (Uint8*)gSdlTextureSurface->pixels + 
+                         dirty_rect.y * gSdlTextureSurface->pitch +
+                         dirty_rect.x * SDL_BYTESPERPIXEL(gSdlTextureSurface->format->format),
+                         gSdlTextureSurface->pitch);
+        dirty_rect.w = 0;
+        dirty_rect.h = 0;
+    }
+    
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
+    
     if (performance_overlay) {
-        debug_update_fps();
         debug_draw_overlay(gSdlRenderer);
     }
+    
     SDL_RenderPresent(gSdlRenderer);
+#else
+    // Standard SDL rendering
+    SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, 
+                     gSdlTextureSurface->pitch);
+    SDL_RenderClear(gSdlRenderer);
+    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
+    SDL_RenderPresent(gSdlRenderer);
+#endif
+}
+
+// ============================================
+// Screen Fade Helper Functions
+// ============================================
+
+// Function to perform a screen fade (used by the game)
+void screen_fade_to_black() {
+    // Fade from current palette to black
+    for (int step = 10; step >= 0; step--) {
+        float brightness = step / 10.0f;
+        ApplyPaletteBrightness(current_palette, brightness);
+        renderPresent();
+        SDL_Delay(30); // Adjust timing as needed
+    }
+}
+
+void screen_fade_from_black() {
+    // Fade from black to current palette
+    for (int step = 0; step <= 10; step++) {
+        float brightness = step / 10.0f;
+        ApplyPaletteBrightness(current_palette, brightness);
+        renderPresent();
+        SDL_Delay(30); // Adjust timing as needed
+    }
+}
+
+void screen_fade_to_color(unsigned char r, unsigned char g, unsigned char b) {
+    // Store original palette
+    unsigned char original_palette[256 * 3];
+    memcpy(original_palette, current_palette, sizeof(original_palette));
+    
+    // Create target color palette
+    unsigned char target_palette[256 * 3];
+    for (int i = 0; i < 256; i++) {
+        target_palette[i * 3] = r;
+        target_palette[i * 3 + 1] = g;
+        target_palette[i * 3 + 2] = b;
+    }
+    
+    // Cross-fade between original and target
+    for (int step = 0; step <= 10; step++) {
+        float t = step / 10.0f;
+        unsigned char faded_palette[256 * 3];
+        
+        for (int i = 0; i < 256; i++) {
+            faded_palette[i * 3] = (unsigned char)(original_palette[i * 3] * (1.0f - t) + r * t);
+            faded_palette[i * 3 + 1] = (unsigned char)(original_palette[i * 3 + 1] * (1.0f - t) + g * t);
+            faded_palette[i * 3 + 2] = (unsigned char)(original_palette[i * 3 + 2] * (1.0f - t) + b * t);
+        }
+        
+        GNW95_SetPalette(faded_palette);
+        renderPresent();
+        SDL_Delay(30);
+    }
 }
 
 } // namespace fallout
