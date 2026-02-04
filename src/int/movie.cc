@@ -316,7 +316,17 @@ static void movie_MVE_ShowFrame(SDL_Surface* surface, int srcWidth, int srcHeigh
     SDL_SetSurfacePalette(surface, gSdlSurface->format->palette);
     SDL_BlitSurface(surface, &srcRect, gSdlSurface, &destRect);
     SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
+    
+#ifdef NXDK
+    // Xbox: Use helper functions to temporarily unlock texture for movie playback
+    movieFrameStart();
+#endif
+    
     renderPresent();
+    
+#ifdef NXDK
+    movieFrameEnd();
+#endif
 }
 
 // 0x478710

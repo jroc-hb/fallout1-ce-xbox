@@ -533,7 +533,6 @@ void renderPresent()
     // Xbox-optimized rendering with frame limiting
     if (texture_locked) {
         // If palette changed, reconvert entire screen before presenting
-        // NXDK TODO: Does this hurt performance?
         if (palette_changed && texture_pixels) {
             Uint32* dst_pixels = static_cast<Uint32*>(texture_pixels);
             const Uint8* src_pixels = static_cast<const Uint8*>(gSdlSurface->pixels);
@@ -606,5 +605,25 @@ void renderPresent()
     SDL_RenderPresent(gSdlRenderer);
 #endif
 }
+
+#ifdef NXDK
+// Movie playback support - temporarily unlock texture so SDL_BlitSurface can work
+void movieFrameStart()
+{
+    if (texture_locked && gSdlTexture) {
+        SDL_UnlockTexture(gSdlTexture);
+        texture_locked = false;
+    }
+}
+
+void movieFrameEnd()
+{
+    if (!texture_locked && gSdlTexture) {
+        texture_locked = (SDL_LockTexture(gSdlTexture, NULL, &texture_pixels, &texture_pitch) == 0);
+    }
+    // Force full update for next render since movie bypasses normal blit path
+    full_update = true;
+}
+#endif
 
 } // namespace fallout

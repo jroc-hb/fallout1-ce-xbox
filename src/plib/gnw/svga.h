@@ -30,6 +30,12 @@ int screenGetHeight();
 void handleWindowSizeChanged();
 void renderPresent();
 
+#ifdef NXDK
+// Movie playback support functions
+void movieFrameStart();
+void movieFrameEnd();
+#endif
+
 } // namespace fallout
 
 #endif /* FALLOUT_PLIB_GNW_SVGA_H_ */
