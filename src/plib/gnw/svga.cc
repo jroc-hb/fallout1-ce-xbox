@@ -532,6 +532,17 @@ void renderPresent()
 #ifdef NXDK
     // Xbox-optimized rendering with frame limiting
     if (texture_locked) {
+        // If palette changed, reconvert entire screen before presenting
+        // NXDK TODO: Does this hurt performance?
+        if (palette_changed && texture_pixels) {
+            Uint32* dst_pixels = static_cast<Uint32*>(texture_pixels);
+            const Uint8* src_pixels = static_cast<const Uint8*>(gSdlSurface->pixels);
+            convert_8to32_simd(src_pixels, dst_pixels, 
+                             gSdlSurface->w, gSdlSurface->h,
+                             gSdlSurface->pitch, texture_pitch);
+            palette_changed = false;
+        }
+        
         // Texture is already locked, just unlock it and let SDL know it changed
         SDL_UnlockTexture(gSdlTexture);
         texture_locked = false;
