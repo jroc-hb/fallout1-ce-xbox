@@ -9,9 +9,6 @@
 #include <hal/video.h>
 #include <hal/debug.h>
 #include <xboxkrnl/xboxkrnl.h>
-#include <SDL_ttf.h>
-#include <x86intrin.h>  // For SSE intrinsics
-#include "game/gconfig.h"
 #endif
 
 namespace fallout {
@@ -20,15 +17,6 @@ static bool createRenderer(int width, int height);
 static void destroyRenderer();
 
 #ifdef NXDK
-// --- Debug overlay state ---
-static int performance_overlay = 0;
-static TTF_Font *debugFont = NULL;
-static Uint32 lastTime = 0;
-static int frameCount = 0;
-static int currentFPS = 0;
-static MM_STATISTICS mem_stats = {0};
-static DWORD last_updated = 0;
-
 // Xbox-specific optimization variables
 static SDL_Rect dirty_rect = {0, 0, 0, 0};
 static bool full_update = true;
@@ -41,14 +29,9 @@ static int texture_pitch = 0;
 static bool texture_locked = false;
 static Uint32* palette_32bit = nullptr; // Pre-converted 32-bit palette
 
-// Performance counters
-static int total_pixels_updated = 0;
-static int total_blits = 0;
-
 // Frame timing for 60 FPS cap
 static const double TARGET_FRAME_TIME = 1000.0 / 60.0; // ~16.67ms per frame
 static Uint32 last_frame_time = 0;
-static double frame_time_accumulator = 0.0;
 #endif
 
 // screen rect
@@ -67,94 +50,6 @@ SDL_Surface* gSdlTextureSurface = NULL;
 FpsLimiter sharedFpsLimiter;
 
 #ifdef NXDK
-// ============================================
-// Xbox-specific HIGH-PERFORMANCE optimizations
-// ============================================
-
-static void debug_update_fps(void) {
-    frameCount++;
-    Uint32 now = SDL_GetTicks();
-    if (now - lastTime >= 1000) {
-        currentFPS = frameCount;
-        // Optional: Log performance stats
-        // debugPrint("FPS: %d, Blits: %d, Pixels: %d\n", currentFPS, total_blits, total_pixels_updated);
-        frameCount = 0;
-        total_blits = 0;
-        total_pixels_updated = 0;
-        lastTime = now;
-    }
-}
-
-static void update_mem_stats_periodically(void) {
-    DWORD now = GetTickCount();
-    if ((last_updated == 0) || ((now - last_updated) > 1000)) {
-        last_updated = now;
-        memset(&mem_stats, 0, sizeof(mem_stats));
-        mem_stats.Length = sizeof(mem_stats);
-        MmQueryStatistics(&mem_stats);
-    }
-}
-
-// Optimized debug overlay - cache textures
-static SDL_Texture* debug_overlay_texture = NULL;
-static char last_debug_text[128] = {0};
-
-static void debug_draw_overlay(SDL_Renderer *renderer) {
-    if (!debugFont) return;
-
-    update_mem_stats_periodically();
-
-    char buf[128];
-    snprintf(buf, sizeof(buf), "FPS: %d  RAM: %d/%d MB",
-        currentFPS,
-        mem_stats.AvailablePages >> 8,
-        mem_stats.TotalPhysicalPages >> 8);
-
-    // Only recreate texture if text changed
-    if (strcmp(last_debug_text, buf) != 0 || !debug_overlay_texture) {
-        strcpy(last_debug_text, buf);
-        
-        if (debug_overlay_texture) {
-            SDL_DestroyTexture(debug_overlay_texture);
-            debug_overlay_texture = NULL;
-        }
-        
-        SDL_Color neonPink = {255, 20, 147, 255};
-        SDL_Surface *textSurface = TTF_RenderText_Blended(debugFont, buf, neonPink);
-        if (textSurface) {
-            debug_overlay_texture = SDL_CreateTextureFromSurface(renderer, textSurface);
-            SDL_FreeSurface(textSurface);
-        }
-    }
-
-    if (debug_overlay_texture) {
-        int w, h;
-        SDL_QueryTexture(debug_overlay_texture, NULL, NULL, &w, &h);
-        
-        // Draw background
-        SDL_Rect bgRect = {10 - 4, 10 - 2, w + 8, h + 4};
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderFillRect(renderer, &bgRect);
-        
-        // Draw text
-        SDL_Rect dst = {10, 10, w, h};
-        SDL_RenderCopy(renderer, debug_overlay_texture, NULL, &dst);
-    }
-}
-
-// Call once at startup
-void debug_overlay_init(void) {
-    if (TTF_Init() == -1) {
-        debugPrint("TTF_Init failed: %s\n", TTF_GetError());
-        return;
-    }
-    debugFont = TTF_OpenFont("D:\\media\\font.ttf", 16);
-    if (!debugFont) {
-        debugPrint("Failed to load font: %s\n", TTF_GetError());
-    }
-}
-
 // Pre-convert 8-bit palette to 32-bit ARGB for faster conversion
 static void update_palette_32bit() {
     if (!palette_32bit) {
@@ -224,10 +119,6 @@ void GNW95_ShowRect_Xbox(unsigned char* src, unsigned int srcPitch,
                         unsigned int a3, unsigned int srcX, unsigned int srcY,
                         unsigned int srcWidth, unsigned int srcHeight,
                         unsigned int destX, unsigned int destY) {
-    
-    // Performance tracking
-    total_blits++;
-    total_pixels_updated += srcWidth * srcHeight;
     
     // Update dirty rectangle
     if (!full_update) {
@@ -433,11 +324,6 @@ bool svga_init(VideoOptions* video_options)
     }
 
 #ifdef NXDK
-    config_get_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_PERFORMANCE_OVERLAY_KEY, &performance_overlay);
-    if (performance_overlay) {
-        debug_overlay_init();
-    }
-    
     // Initialize frame timing
     last_frame_time = SDL_GetTicks();
 #endif
@@ -515,11 +401,6 @@ bool svga_init(VideoOptions* video_options)
 void svga_exit()
 {
 #ifdef NXDK
-    if (debug_overlay_texture) {
-        SDL_DestroyTexture(debug_overlay_texture);
-        debug_overlay_texture = NULL;
-    }
-    
     if (palette_32bit) {
         delete[] palette_32bit;
         palette_32bit = nullptr;
@@ -650,8 +531,6 @@ void renderPresent()
 {
 #ifdef NXDK
     // Xbox-optimized rendering with frame limiting
-    debug_update_fps();
-    
     if (texture_locked) {
         // Texture is already locked, just unlock it and let SDL know it changed
         SDL_UnlockTexture(gSdlTexture);
@@ -681,10 +560,6 @@ void renderPresent()
     
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
-    
-    if (performance_overlay) {
-        debug_draw_overlay(gSdlRenderer);
-    }
     
     SDL_RenderPresent(gSdlRenderer);
     
