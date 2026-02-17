@@ -714,11 +714,9 @@ void mouse_set_position(int x, int y)
 // Helper function to warp the cursor to an exact spot on the screen with no glitching
 void warp_mouse(int x, int y)
 {
-    int offsetX = (screenGetWidth() - 640) / 2;
-    int offsetY = (screenGetHeight() - 480) / 2;
-
+    debug_printf("Warping mouse to (%d, %d)", x, y);
     mouse_hide();
-    mouse_set_position(x + offsetX, y + offsetY);
+    mouse_set_position(x, y);
     mouse_show();
     debug_printf("Warped mouse to (%d, %d)\n", x, y);
 }
@@ -728,6 +726,16 @@ void warp_mouse_to_button(int button)
 {
     int button_x = win_get_button_center_x(button);
     int button_y = win_get_button_center_y(button);
+    debug_printf("warp_mouse_to_button %d at (%d, %d)\n", button, button_x, button_y);
+    warp_mouse(button_x, button_y);
+}
+
+// Takes a button ID and warps the mouse cursor to the top right corner of that button
+void warp_mouse_to_dialogue_option(int button)
+{
+    int button_x = win_get_button_top_right_x(button);
+    int button_y = win_get_button_top_right_y(button);
+    debug_printf("warp_mouse_to_dialogue_option %d at (%d, %d)\n", button, button_x, button_y);
     warp_mouse(button_x, button_y);
 }
 #endif

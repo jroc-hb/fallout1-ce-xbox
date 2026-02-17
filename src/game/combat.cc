@@ -4294,6 +4294,10 @@ static int get_called_shot_location(Object* critter, int* hit_location, int hit_
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
     }
 
+#ifdef NXDK
+    warp_mouse_to_button(btn);
+#endif
+
     int oldFont = text_curr();
     text_font(101);
 

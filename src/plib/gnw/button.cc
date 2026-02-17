@@ -7,6 +7,7 @@
 #include "plib/gnw/memory.h"
 #include "plib/gnw/mouse.h"
 #include "plib/gnw/text.h"
+#include "plib/gnw/debug.h"
 
 namespace fallout {
 
@@ -343,6 +344,9 @@ static Button* button_create(int win, int x, int y, int width, int height, int m
     button->releaseSoundFunc = NULL;
     button->buttonGroup = NULL;
     button->prev = NULL;
+    #ifdef NXDK
+    button->win_rect = w->rect;
+    #endif
 
     button->next = w->buttonListHead;
     if (button->next != NULL) {
@@ -1239,16 +1243,36 @@ int win_button_press_and_release(int btn)
 #ifdef NXDK
 int win_get_button_center_x(int btn) {
     Button* b = GNW_find_button(btn, NULL);
+    debug_printf("win_rect ulx: %d\n", b->win_rect.ulx);
+    debug_printf("win_rect lrx: %d\n", b->win_rect.lrx);
     if (b != NULL) {
-        return (b->rect.ulx + b->rect.lrx) / 2;
+        return ((b->rect.ulx + b->rect.lrx) / 2) + b->win_rect.ulx;
     }
     return 0;
 }
 
 int win_get_button_center_y(int btn) {
     Button* b = GNW_find_button(btn, NULL);
+    debug_printf("win_rect uly: %d\n", b->win_rect.uly);
+    debug_printf("win_rect lry: %d\n", b->win_rect.lry);
     if (b != NULL) {
-        return (b->rect.uly + b->rect.lry) / 2;
+        return ((b->rect.uly + b->rect.lry) / 2) + b->win_rect.uly;
+    }
+    return 0;
+}
+
+int win_get_button_top_right_x(int btn) {
+    Button* b = GNW_find_button(btn, NULL);
+    if (b != NULL) {
+        return (b->rect.ulx + b->rect.lrx) + b->win_rect.ulx - 3;
+    }
+    return 0;
+}
+
+int win_get_button_top_right_y(int btn) {
+    Button* b = GNW_find_button(btn, NULL);
+    if (b != NULL) {
+        return b->rect.uly + b->win_rect.uly;
     }
     return 0;
 }

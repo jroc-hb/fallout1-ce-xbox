@@ -31,6 +31,8 @@ int win_button_press_and_release(int btn);
 #ifdef NXDK
 int win_get_button_center_x(int btn);
 int win_get_button_center_y(int btn);
+int win_get_button_top_right_x(int btn);
+int win_get_button_top_right_y(int btn);
 #endif
 
 } // namespace fallout

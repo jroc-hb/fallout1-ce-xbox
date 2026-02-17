@@ -288,6 +288,7 @@ void main_menu_show(bool animate)
     if (!main_menu_is_hidden) {
         return;
     }
+    warp_mouse_to_button(buttons[0]);
 
     win_show(main_window);
 
@@ -297,7 +298,6 @@ void main_menu_show(bool animate)
     }
 
     main_menu_is_hidden = false;
-    warp_mouse(438, 58);
 }
 
 // 0x4733BC

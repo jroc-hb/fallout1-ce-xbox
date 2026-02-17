@@ -4702,11 +4702,11 @@ void barter_inventory(int win, Object* a2, Object* a3, Object* a4, int a5)
                 }
             } else {
                 // Fallback approximation if we can't read the dialog rect
-                int buttonY = screenGetHeight() - 20; // Near bottom of screen
+                int buttonY = 480 - 20; // Near bottom of screen
                 if (barter_option == 0) {
                     warp_mouse(50, buttonY);
                 } else {
-                    warp_mouse(screenGetWidth() - 50, buttonY);
+                    warp_mouse(640 - 50, buttonY);
                 }
             }
 #endif

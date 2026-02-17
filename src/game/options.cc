@@ -132,6 +132,13 @@ typedef struct PreferenceDescription {
     int* valuePtr;
 } PreferenceDescription;
 
+#ifdef NXDK
+// Variable used for gamepad menu navigation
+static int menuIndex = 0;
+int buttonCount = 0;
+static int buttons[OPTIONS_WINDOW_BUTTONS_COUNT];
+#endif
+
 static int OptnStart();
 static int OptnEnd();
 static void ShadeScreen(bool a1);
@@ -384,13 +391,27 @@ int do_options()
         debug_printf("\nOPTION MENU: Error loading option dialog data!\n");
         return -1;
     }
-
+#ifdef NXDK
+    warp_mouse_to_button(buttons[menuIndex]);
+#endif
     int rc = -1;
     while (rc == -1) {
         sharedFpsLimiter.mark();
 
         int keyCode = get_input();
         bool showPreferences = false;
+
+#ifdef NXDK
+        // Gamepad support: Navigate menu with D-Pad by warping the mouse cursor between buttons
+        if (keyCode == KEY_ARROW_DOWN || keyCode == KEY_ARROW_UP) {
+            if (keyCode == KEY_ARROW_DOWN) {
+                menuIndex = (menuIndex + 1) % buttonCount;
+            } else {
+                menuIndex = (menuIndex - 1 + buttonCount) % buttonCount;
+            }
+            warp_mouse_to_button(buttons[menuIndex]);
+        }
+#endif
 
         if (keyCode == KEY_ESCAPE || keyCode == 504 || game_user_wants_to_quit != 0) {
             rc = 0;
@@ -575,6 +596,10 @@ static int OptnStart()
             win_register_button_sound_func(btn, gsound_lrg_butt_press, gsound_lrg_butt_release);
         }
 
+#ifdef NXDK
+        buttons[buttonCount++] = btn;
+#endif
+
         buttonY += ginfo[OPTIONS_WINDOW_FRM_BUTTON_ON].height + 3;
     }
 
@@ -588,6 +613,13 @@ static int OptnStart()
 // 0x481908
 static int OptnEnd()
 {
+#ifdef NXDK
+    menuIndex = 0;
+    for (int index = 0; index < OPTIONS_WINDOW_BUTTONS_COUNT; index++) {
+        buttons[index] = 0;
+    }
+    buttonCount = 0;
+#endif
     win_delete(optnwin);
     text_font(fontsave);
     message_exit(&optn_msgfl);
@@ -744,6 +776,9 @@ int PauseWindow(bool is_world_map)
     if (doneBtn != -1) {
         win_register_button_sound_func(doneBtn, gsound_red_butt_press, gsound_red_butt_release);
     }
+#ifdef NXDK
+    warp_mouse_to_button(doneBtn);
+#endif
 
     win_draw(window);
 
@@ -885,7 +920,9 @@ static int do_prefscreen()
     }
 
     PrefEnd();
-
+#ifdef NXDK
+    warp_mouse_to_button(buttons[menuIndex]);
+#endif
     return rc;
 }
 
@@ -1092,6 +1129,10 @@ static int PrefStart()
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
     }
+
+#ifdef NXDK
+    warp_mouse_to_button(btn);
+#endif
 
     // CANCEL
     btn = win_register_button(prfwin,

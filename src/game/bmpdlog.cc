@@ -129,6 +129,11 @@ int dialog_out(const char* title, const char** body, int bodyLength, int x, int 
     MessageListItem messageListItem;
     int savedFont = text_curr();
 
+#ifdef NXDK
+    int yesBtn = -1;
+    int noBtn = -1;
+#endif
+
     bool v86 = false;
 
     bool hasTwoButtons = false;
@@ -276,10 +281,15 @@ int dialog_out(const char* title, const char** body, int bodyLength, int x, int 
             text_to_buf(windowBuf + backgroundWidth * (doneY[dialogType] + 3) + v27 + 35, messageListItem.text, backgroundWidth, backgroundWidth, colorTable[18979]);
         }
 
+        // Modal "Yes" Button
         int btn = win_register_button(win, v27 + 13, doneY[dialogType] + 4, downButtonWidth, downButtonHeight, -1, -1, -1, 500, upButton, downButton, NULL, BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
         }
+#ifdef NXDK
+        yesBtn = btn;
+        warp_mouse_to_button(yesBtn);
+#endif
 
         v86 = true;
     }
@@ -302,6 +312,7 @@ int dialog_out(const char* title, const char** body, int bodyLength, int x, int 
             text_to_buf(windowBuf + backgroundWidth * (doneY[dialogType] + 3) + doneX[dialogType] + doneBoxWidth + 59,
                 a8, backgroundWidth, backgroundWidth, colorTable[18979]);
 
+            // Modal "No" Button
             int btn = win_register_button(win,
                 doneBoxWidth + doneX[dialogType] + 37,
                 doneY[dialogType] + 4,
@@ -311,6 +322,9 @@ int dialog_out(const char* title, const char** body, int bodyLength, int x, int 
             if (btn != -1) {
                 win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
             }
+#ifdef NXDK
+            noBtn = btn;
+#endif
         } else {
             int doneBoxFid = art_id(OBJ_TYPE_INTERFACE, 209, 0, 0, 0);
             unsigned char* doneBox = art_lock(doneBoxFid, &doneBoxHandle, &doneBoxWidth, &doneBoxHeight);
@@ -393,7 +407,6 @@ int dialog_out(const char* title, const char** body, int bodyLength, int x, int 
             if (btn != -1) {
                 win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
             }
-
             v86 = true;
         }
     }
@@ -462,6 +475,14 @@ int dialog_out(const char* title, const char** body, int bodyLength, int x, int 
         sharedFpsLimiter.mark();
 
         int keyCode = get_input();
+
+#ifdef NXDK
+        if ((keyCode == KEY_ARROW_LEFT) && (yesBtn != -1)) {
+            warp_mouse_to_button(yesBtn);
+        } else if ((keyCode == KEY_ARROW_RIGHT) && (noBtn != -1)) {
+            warp_mouse_to_button(noBtn);
+        }
+#endif
 
         if (keyCode == 500) {
             rc = 1;
@@ -685,6 +706,9 @@ int file_dialog(char* title, char** fileList, char* dest, int fileListLength, in
     int doubleClickSelectedFileIndex = -2;
     int doubleClickTimer = FILE_DIALOG_DOUBLE_CLICK_DELAY;
 
+#ifdef NXDK
+    warp_mouse_to_button(doneBtn);
+#endif
     int rc = -1;
     while (rc == -1) {
         sharedFpsLimiter.mark();
@@ -696,6 +720,14 @@ int file_dialog(char* title, char** fileList, char* dest, int fileListLength, in
         bool isScrolling = false;
 
         convertMouseWheelToArrowKey(&keyCode);
+
+#ifdef NXDK
+        if (keyCode == KEY_ARROW_LEFT) {
+            warp_mouse_to_button(doneBtn);
+        } else if (keyCode == KEY_ARROW_RIGHT) {
+            warp_mouse_to_button(cancelBtn);
+        }
+#endif
 
         if (keyCode == 500) {
             if (fileListLength != 0) {
@@ -1115,6 +1147,14 @@ int save_file_dialog(char* title, char** fileList, char* dest, int fileListLengt
         bool isScrolling = false;
 
         convertMouseWheelToArrowKey(&keyCode);
+
+#ifdef NXDK
+        if (keyCode == KEY_ARROW_LEFT) {
+            warp_mouse_to_button(doneBtn);
+        } else if (keyCode == KEY_ARROW_RIGHT) {
+            warp_mouse_to_button(cancelBtn);
+        }
+#endif
 
         if (keyCode == 500) {
             rc = 0;

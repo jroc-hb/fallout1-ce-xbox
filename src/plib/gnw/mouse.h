@@ -67,6 +67,7 @@ void convertMouseWheelToArrowKey(int* keyCodePtr);
 #ifdef NXDK
 void warp_mouse(int x, int y);
 void warp_mouse_to_button(int button);
+void warp_mouse_to_dialogue_option(int button);
 #endif
 
 } // namespace fallout

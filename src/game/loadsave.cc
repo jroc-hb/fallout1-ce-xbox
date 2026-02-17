@@ -323,6 +323,8 @@ static CacheEntry* grphkey[LOAD_SAVE_FRM_COUNT];
 #ifdef NXDK
 static int done_button;
 static int cancel_button;
+static int save_done_btn;
+static int save_cancel_btn;
 #endif
 
 // 0x46D954
@@ -477,7 +479,9 @@ int SaveGame(int mode)
     renderPresent();
 
     dbleclkcntr = 24;
-
+#ifdef NXDK
+    warp_mouse_to_button(done_button);
+#endif
     int rc = -1;
     int doubleClickSlot = -1;
     while (rc == -1) {
@@ -510,6 +514,14 @@ int SaveGame(int mode)
                 selectionChanged = true;
                 doubleClickSlot = -1;
                 break;
+#ifdef NXDK
+            case KEY_ARROW_LEFT:
+                warp_mouse_to_button(done_button);
+                break;
+            case KEY_ARROW_RIGHT:
+                warp_mouse_to_button(cancel_button);
+                break;
+#endif
             case KEY_HOME:
                 slot_cursor = 0;
                 selectionChanged = true;
@@ -2159,7 +2171,7 @@ static int GetComment(int a1)
 
     int btn;
 
-    // DONE
+    // SAVE GAME DONE
     btn = win_register_button(window,
         34,
         58,
@@ -2177,7 +2189,11 @@ static int GetComment(int a1)
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
     }
 
-    // CANCEL
+#ifdef NXDK
+    save_done_btn = btn;
+#endif
+
+    // SAVE GAME CANCEL
     btn = win_register_button(window,
         160,
         58,
@@ -2194,6 +2210,10 @@ static int GetComment(int a1)
     if (btn == -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
     }
+
+#ifdef NXDK
+    save_cancel_btn = btn;
+#endif
 
     win_draw(window);
 
@@ -2250,6 +2270,10 @@ static int get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* des
     int blinkCounter = 3;
     bool blink = false;
 
+#ifdef NXDK
+    warp_mouse_to_button(save_done_btn);
+#endif
+
     int v1 = 0;
 
     int rc = 1;
@@ -2262,7 +2286,13 @@ static int get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* des
         if ((keyCode & 0x80000000) == 0) {
             v1++;
         }
-
+#ifdef NXDK
+        if (keyCode == KEY_ARROW_LEFT) {
+            warp_mouse_to_button(save_done_btn);
+        } else if (keyCode == KEY_ARROW_RIGHT) {
+            warp_mouse_to_button(save_cancel_btn);
+        }
+#endif
         if (keyCode == doneKeyCode || keyCode == KEY_RETURN) {
             rc = 0;
         } else if (keyCode == cancelKeyCode || keyCode == KEY_ESCAPE) {

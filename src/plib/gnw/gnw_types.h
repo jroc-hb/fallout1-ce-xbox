@@ -109,6 +109,9 @@ typedef struct Button {
     ButtonGroup* buttonGroup;
     Button* prev;
     Button* next;
+    #ifdef NXDK
+    Rect win_rect;
+    #endif
 } Button;
 
 typedef struct ButtonGroup {
