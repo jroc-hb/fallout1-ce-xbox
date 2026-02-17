@@ -28,10 +28,6 @@ static void* texture_pixels = nullptr;
 static int texture_pitch = 0;
 static bool texture_locked = false;
 static Uint32* palette_32bit = nullptr; // Pre-converted 32-bit palette
-
-// Frame timing for 60 FPS cap
-static const double TARGET_FRAME_TIME = 1000.0 / 60.0; // ~16.67ms per frame
-static Uint32 last_frame_time = 0;
 #endif
 
 // screen rect
@@ -323,10 +319,7 @@ bool svga_init(VideoOptions* video_options)
         return false;
     }
 
-#ifdef NXDK
-    // Initialize frame timing
-    last_frame_time = SDL_GetTicks();
-#endif
+    // NO FRAME TIMING INITIALIZATION - Removed
 
 #ifdef NXDK
     Uint32 windowFlags = SDL_WINDOW_FULLSCREEN;
@@ -430,9 +423,9 @@ int screenGetHeight()
 static bool createRenderer(int width, int height)
 {
 #ifdef NXDK
-    // Create renderer WITHOUT vsync - we'll handle frame timing manually
     gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, 
-                                      SDL_RENDERER_ACCELERATED);
+                                  SDL_RENDERER_ACCELERATED | 
+                                  SDL_RENDERER_PRESENTVSYNC);
     
     if (!gSdlRenderer) {
         // Fallback to software
@@ -529,8 +522,7 @@ void handleWindowSizeChanged()
 
 void renderPresent()
 {
-#ifdef NXDK
-    // Xbox-optimized rendering with frame limiting
+#ifdef NXDK    
     if (texture_locked) {
         // If palette changed, reconvert entire screen before presenting
         if (palette_changed && texture_pixels) {
@@ -571,31 +563,7 @@ void renderPresent()
     SDL_RenderClear(gSdlRenderer);
     SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
     
-    SDL_RenderPresent(gSdlRenderer);
-    
-    // *** FRAME RATE LIMITING - Cap at 60 FPS ***
-    // Calculate time spent rendering this frame
-    Uint32 current_time = SDL_GetTicks();
-    double frame_time = static_cast<double>(current_time - last_frame_time);
-    
-    // If frame rendered faster than target, delay to maintain 60 FPS
-    if (frame_time < TARGET_FRAME_TIME) {
-        double sleep_time = TARGET_FRAME_TIME - frame_time;
-        
-        // Use SDL_Delay for most of the time (1ms resolution)
-        // but leave a small buffer for precision
-        if (sleep_time > 2.0) {
-            SDL_Delay(static_cast<Uint32>(sleep_time - 1.0));
-        }
-        
-        // Spin-wait for the remaining time for precision
-        while (static_cast<double>(SDL_GetTicks() - last_frame_time) < TARGET_FRAME_TIME) {
-            // Tight loop - very precise timing
-        }
-    }
-    
-    last_frame_time = SDL_GetTicks();
-    
+    SDL_RenderPresent(gSdlRenderer);    
 #else
     // Standard SDL rendering
     SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, 
