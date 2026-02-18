@@ -293,8 +293,8 @@ void HandleControllerButtonUp(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_BACK: // Character Sheet (C)
-        simulatedKeyboardKey = {SDL_SCANCODE_C, 0};
+    case SDL_CONTROLLER_BUTTON_BACK: // Help Screen (F1)
+        simulatedKeyboardKey = {SDL_SCANCODE_F1, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -303,13 +303,13 @@ void HandleControllerButtonUp(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_LEFTSTICK: // Center Camera on Player (Home)
-        simulatedKeyboardKey = {SDL_SCANCODE_HOME, 0};
+    case SDL_CONTROLLER_BUTTON_LEFTSTICK: // Enter Combat Mode (A) 
+        simulatedKeyboardKey = {SDL_SCANCODE_A, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_RIGHTSTICK: // Enter Combat Mode (A)
-        simulatedKeyboardKey = {SDL_SCANCODE_A, 0};
+    case SDL_CONTROLLER_BUTTON_RIGHTSTICK: // Center Camera on Player (Home)
+        simulatedKeyboardKey = {SDL_SCANCODE_HOME, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -319,7 +319,7 @@ void HandleControllerButtonUp(const SDL_Event& event)
         break;
 
     case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: // [White Button] End Turn (Space)
-        simulatedKeyboardKey = {SDL_SCANCODE_E, 0};
+        simulatedKeyboardKey = {SDL_SCANCODE_SPACE, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -371,8 +371,8 @@ void HandleControllerButtonDown(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_BACK: // Character Sheet (C)
-        simulatedKeyboardKey = {SDL_SCANCODE_C, 1};
+    case SDL_CONTROLLER_BUTTON_BACK: // Help Screen (F1)
+        simulatedKeyboardKey = {SDL_SCANCODE_F1, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -381,13 +381,13 @@ void HandleControllerButtonDown(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_LEFTSTICK: // Center Camera on Player (Home)
-        simulatedKeyboardKey = {SDL_SCANCODE_HOME, 1};
+    case SDL_CONTROLLER_BUTTON_LEFTSTICK: // Enter Combat Mode (A) 
+        simulatedKeyboardKey = {SDL_SCANCODE_A, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_RIGHTSTICK: // Enter Combat Mode (A)
-        simulatedKeyboardKey = {SDL_SCANCODE_A, 1};
+    case SDL_CONTROLLER_BUTTON_RIGHTSTICK: // Center Camera on Player (Home)
+        simulatedKeyboardKey = {SDL_SCANCODE_HOME, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -397,7 +397,7 @@ void HandleControllerButtonDown(const SDL_Event& event)
         break;
 
     case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: // [White Button] End Turn (Space)
-        simulatedKeyboardKey = {SDL_SCANCODE_E, 1};
+        simulatedKeyboardKey = {SDL_SCANCODE_SPACE, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 

@@ -198,7 +198,11 @@ long audiofSeek(int fileHandle, long offset, int origin)
     }
 
     if ((audioFile->flags & AUDIO_FILE_COMPRESSED) != 0) {
+#ifdef NXDK
+        if (a4 < audioFile->position) {
+#else
         if (a4 <= audioFile->position) {
+#endif
             AudioDecoder_Close(audioFile->audioDecoder);
             fseek(audioFile->stream, 0, SEEK_SET);
             clearerr(audioFile->stream);

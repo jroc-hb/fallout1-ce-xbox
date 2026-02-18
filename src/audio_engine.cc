@@ -103,7 +103,11 @@ bool audioEngineInit()
     desiredSpec.freq = 22050;
     desiredSpec.format = AUDIO_S16;
     desiredSpec.channels = 2;
+#ifdef NXDK
+    desiredSpec.samples = 2048; // NXDK TODO Fixes audio crackling but may be causing FMV stuttering?
+#else
     desiredSpec.samples = 1024;
+#endif
     desiredSpec.callback = audioEngineMixin;
 
     gAudioEngineDeviceId = SDL_OpenAudioDevice(NULL, 0, &desiredSpec, &gAudioEngineSpec, SDL_AUDIO_ALLOW_ANY_CHANGE);

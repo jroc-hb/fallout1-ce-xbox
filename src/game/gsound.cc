@@ -229,7 +229,7 @@ int gsound_init()
     config_get_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_CACHE_SIZE_KEY, &cacheSize);
 #ifdef NXDK
     debug_printf("Xbox build detected - forcing cache_size to 4096 bytes\n");
-    cacheSize = 4096;
+    cacheSize = 448;
 #endif
     if (cacheSize >= 0x40000) {
         debug_printf("\n!!! Config file needs adustment.  Please remove the ");
