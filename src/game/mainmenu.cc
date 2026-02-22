@@ -154,6 +154,10 @@ int main_menu_create()
     getverstr(version, sizeof(version));
     len = text_width(version);
     win_print(main_window, version, 0, 615 - len, 460, colorTable[21204] | 0x4000000 | 0x2000000);
+#ifdef NXDK
+    len = text_width("Ported by Jroc/Justy");
+    win_print(main_window, "Ported by Jroc/Justy", 0, 615 - len, 450, colorTable[21204] | 0x4000000 | 0x2000000);
+#endif
 
     // menuup.frm
     fid = art_id(OBJ_TYPE_INTERFACE, 299, 0, 0, 0);

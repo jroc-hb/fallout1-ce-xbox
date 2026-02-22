@@ -11,6 +11,7 @@ namespace fallout {
 extern float leftStickX, leftStickY, rightStickX, rightStickY;
 
 bool GetGamepadMouseState(MouseData* mouseState);
+void GamepadInit();
 void HandleJoystickDeviceAdded(const SDL_Event& event);
 void HandleJoystickDeviceRemoved(const SDL_Event& event);
 void HandleControllerDeviceAdded(const SDL_Event& event);
@@ -20,6 +21,7 @@ void HandleControllerButtonUp(const SDL_Event& event);
 void HandleControllerButtonDown(const SDL_Event& event);
 void ProcessLeftStick();
 void ProcessRightStick();
+void ProcessTriggers();
 
 } // namespace fallout
 

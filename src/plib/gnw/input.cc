@@ -1085,7 +1085,8 @@ void GNW95_process_message()
     // We need to process event loop even if program is not active or keyboard
     // is disabled, because if we ignore it, we'll never be able to reactivate
     // it again.
-
+    
+    ProcessTriggers();
     ProcessLeftStick();
     ProcessRightStick();
 

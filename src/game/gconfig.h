@@ -88,6 +88,14 @@ namespace fallout {
 #define GAME_CONFIG_DEFAULT_F8_AS_GAME_KEY "default_f8_as_game"
 #define GAME_CONFIG_PLAYER_SPEEDUP_KEY "player_speedup"
 
+#ifdef NXDK
+#define GAME_CONFIG_CONTROL_KEY "control"
+#define GAME_CONFIG_LEFT_STICK_DEADZONE_KEY "left_stick_deadzone"
+#define GAME_CONFIG_RIGHT_STICK_DEADZONE_KEY "right_stick_deadzone"
+#define GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY "left_stick_sensitivity"
+#define GAME_CONFIG_RIGHT_STICK_SENSITIVITY_KEY "right_stick_sensitivity"
+#endif
+
 #define ENGLISH "english"
 #define FRENCH "french"
 #define GERMAN "german"

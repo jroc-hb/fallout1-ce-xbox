@@ -9,6 +9,7 @@
 #include "plib/gnw/svga.h"
 #include "plib/gnw/dxinput.h"
 #include "plib/gnw/input.h"
+#include "game/gconfig.h"
 #include "game/map.h"
 
 // Based on glebm's initial mouse support PR https://github.com/alexbatalov/fallout1-ce/pull/118
@@ -16,6 +17,29 @@
 namespace fallout {
 
 static SDL_GameController* gController = nullptr;
+
+// Gamepad settings read from config on init.
+// Deadzone is stored as a whole-number percentage (0-100) and converted to [0.0..1.0] at use.
+// Sensitivity is the inverse-speed divisor passed to the stick accumulators:
+//   higher = slower.
+//
+// Deadzone (20%): masks drift on worn OG Xbox controllers without cutting into usable
+//   analog range near centre.
+//
+// Left stick sensitivity (3): at full deflection the cursor travels ~320px/s on
+//   Fallout 1's 640x480 resolution. The Destiny-style acceleration curve (v*|v|)
+//   means half-deflection gives ~80px/s for fine precision, scaling up to full
+//   speed only at the outer range of travel.
+//
+// Right stick sensitivity (16): pixel-speed divisor for map_scroll_pixels().
+//   pixel_delta_per_frame = stickValue * dtc_ms / sensitivity
+//   At full deflection and 16ms frames (60fps): 16/16 = 1px/frame = ~60px/sec.
+//   This gives smooth sub-tile scrolling at a comfortable pan speed.
+//   Halve the value to double the speed.
+static int gLeftStickDeadzonePercent  = 20;
+static int gRightStickDeadzonePercent = 20;
+static int gLeftStickSensitivity      = 3;
+static int gRightStickSensitivity     = 50; // 16 og
 
 // Simulated mouse state using gamepad inputs
 int gGamepadLeftClick = 0;
@@ -47,6 +71,54 @@ bool GetGamepadMouseState(MouseData* mouseState)
 }
 
 namespace {
+
+// Analog trigger values in [0.0..1.0]
+static float gLeftTriggerValue  = 0.0f;
+static float gRightTriggerValue = 0.0f;
+
+// Right-trigger click state
+static bool gRightTriggerShiftHeld = false;
+
+// Tracks whether the A button is currently held (set/cleared in button handlers).
+static bool gAButtonHeld = false;
+
+// D-pad held state, used to detect diagonals for the left-trigger chord mapping.
+static bool gDpadUp    = false;
+static bool gDpadDown  = false;
+static bool gDpadLeft  = false;
+static bool gDpadRight = false;
+
+// The scancode currently held via the left-trigger + d-pad chord
+// (SDL_SCANCODE_UNKNOWN if none).
+static SDL_Scancode gLeftTriggerChordKey = SDL_SCANCODE_UNKNOWN;
+
+// Minimum left-trigger value to activate the d-pad chord mapping.
+static constexpr float kChordTriggerThreshold = 0.5f;
+
+// Maps the current d-pad held state to a digit scancode (1-8, clockwise from Up),
+// or SDL_SCANCODE_UNKNOWN if no recognised direction is active.
+SDL_Scancode GetDpadChordScancode()
+{
+    if ( gDpadUp   && !gDpadDown && !gDpadLeft && !gDpadRight) return SDL_SCANCODE_1;
+    if ( gDpadUp   && !gDpadDown && !gDpadLeft &&  gDpadRight) return SDL_SCANCODE_2;
+    if (!gDpadUp   && !gDpadDown && !gDpadLeft &&  gDpadRight) return SDL_SCANCODE_3;
+    if (!gDpadUp   &&  gDpadDown && !gDpadLeft &&  gDpadRight) return SDL_SCANCODE_4;
+    if (!gDpadUp   &&  gDpadDown && !gDpadLeft && !gDpadRight) return SDL_SCANCODE_5;
+    if (!gDpadUp   &&  gDpadDown &&  gDpadLeft && !gDpadRight) return SDL_SCANCODE_6;
+    if (!gDpadUp   && !gDpadDown &&  gDpadLeft && !gDpadRight) return SDL_SCANCODE_7;
+    if ( gDpadUp   && !gDpadDown &&  gDpadLeft && !gDpadRight) return SDL_SCANCODE_8;
+    return SDL_SCANCODE_UNKNOWN;
+}
+
+// Releases the currently held chord key, if any.
+void ReleaseChordKey()
+{
+    if (gLeftTriggerChordKey != SDL_SCANCODE_UNKNOWN) {
+        KeyboardData key = {gLeftTriggerChordKey, 0};
+        GNW95_process_key(&key);
+        gLeftTriggerChordKey = SDL_SCANCODE_UNKNOWN;
+    }
+}
 
     // [-32767.0..+32767.0] -> [-1.0..1.0]
     void ScaleJoystickAxes(float* x, float* y, float deadzone)
@@ -93,7 +165,7 @@ namespace {
 
     void ScaleLeftJoystick()
     {
-        const float leftDeadzone = 0.24f;
+        const float leftDeadzone = gLeftStickDeadzonePercent / 100.0f;
         leftStickX = leftStickXUnscaled;
         leftStickY = leftStickYUnscaled;
         ScaleJoystickAxes(&leftStickX, &leftStickY, leftDeadzone);
@@ -101,7 +173,7 @@ namespace {
 
     void ScaleRightJoystick()
     {
-        const float rightDeadzone = 0.24f;
+        const float rightDeadzone = gRightStickDeadzonePercent / 100.0f;
         rightStickX = rightStickXUnscaled;
         rightStickY = rightStickYUnscaled;
         ScaleJoystickAxes(&rightStickX, &rightStickY, rightDeadzone);
@@ -213,10 +285,6 @@ float leftStickX, leftStickY, rightStickX, rightStickY;
 
 void HandleControllerAxisMotion(const SDL_Event& event)
 {
-    static bool leftTriggerPressed = false;
-    static bool rightTriggerPressed = false;
-    const int triggerThreshold = 30000;
-
     switch (event.caxis.axis) {
     case SDL_CONTROLLER_AXIS_LEFTX:
         leftStickXUnscaled = static_cast<float>(event.caxis.value);
@@ -238,33 +306,28 @@ void HandleControllerAxisMotion(const SDL_Event& event)
         ScaleRightJoystick();
         break;
 
-    // Trigger inputs are handled here since they are technically analog axes
+    // Left trigger: analog mouse speed modifier.
+    // Full press -> 25% speed, half press -> 62.5% speed, etc.
+    // Speed multiplier = 1.0 - triggerValue * 0.75 (applied in ProcessLeftStick).
+    // Also gates the d-pad chord mapping when >= kChordTriggerThreshold.
     case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
-        if (event.caxis.value > triggerThreshold) {
-            if (!leftTriggerPressed) {
-                leftTriggerPressed = true;
-                KeyboardData key = {SDL_SCANCODE_N, 1};
-                GNW95_process_key(&key);
+        {
+            const float prev = gLeftTriggerValue;
+            gLeftTriggerValue = std::max(0.0f, std::min(1.0f,
+                static_cast<float>(event.caxis.value) / 32767.0f));
+
+            // If the trigger drops below the chord threshold, release any held
+            // chord key so it doesn't get stuck.
+            if (prev >= kChordTriggerThreshold && gLeftTriggerValue < kChordTriggerThreshold) {
+                ReleaseChordKey();
             }
-        } else if (leftTriggerPressed) {
-            leftTriggerPressed = false;
-            KeyboardData key = {SDL_SCANCODE_N, 0};
-            GNW95_process_key(&key);
         }
         break;
 
+    // Right trigger: simple left mouse click (held while trigger is pressed).
     case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
-        if (event.caxis.value > triggerThreshold) {
-            if (!rightTriggerPressed) {
-                rightTriggerPressed = true;
-                KeyboardData key = {SDL_SCANCODE_B, 1};
-                GNW95_process_key(&key);
-            }
-        } else if (rightTriggerPressed) {
-            rightTriggerPressed = false;
-            KeyboardData key = {SDL_SCANCODE_B, 0};
-            GNW95_process_key(&key);
-        }
+        gRightTriggerValue = std::max(0.0f, std::min(1.0f,
+            static_cast<float>(event.caxis.value) / 32767.0f));
         break;
     }
 }
@@ -276,7 +339,7 @@ void HandleControllerButtonUp(const SDL_Event& event)
 
     switch (event.cbutton.button) {
     case SDL_CONTROLLER_BUTTON_A: // Left Mouse Click
-        gGamepadLeftClick = 0;
+        gAButtonHeld = false;
         break;
 
     case SDL_CONTROLLER_BUTTON_B: // Right MouseClick
@@ -293,8 +356,8 @@ void HandleControllerButtonUp(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_BACK: // Help Screen (F1)
-        simulatedKeyboardKey = {SDL_SCANCODE_F1, 0};
+    case SDL_CONTROLLER_BUTTON_BACK: // Toggle Active Items (B)
+        simulatedKeyboardKey = {SDL_SCANCODE_B, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -303,8 +366,8 @@ void HandleControllerButtonUp(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_LEFTSTICK: // Enter Combat Mode (A) 
-        simulatedKeyboardKey = {SDL_SCANCODE_A, 0};
+    case SDL_CONTROLLER_BUTTON_LEFTSTICK: // Skilldex (S)
+        simulatedKeyboardKey = {SDL_SCANCODE_S, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -323,24 +386,46 @@ void HandleControllerButtonUp(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_UP: // Menu/Map Uo (Up Arrow)
-        simulatedKeyboardKey = {SDL_SCANCODE_UP, 0};
-        GNW95_process_key(&simulatedKeyboardKey);
+    // D-pad: update held state, then either release the chord key (trigger held)
+    // or send the normal arrow key release.
+    case SDL_CONTROLLER_BUTTON_DPAD_UP:
+        gDpadUp = false;
+        if (gLeftTriggerValue >= kChordTriggerThreshold) {
+            ReleaseChordKey();
+        } else {
+            simulatedKeyboardKey = {SDL_SCANCODE_UP, 0};
+            GNW95_process_key(&simulatedKeyboardKey);
+        }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_DOWN: // Menu/Map Down (Down Arrow)
-        simulatedKeyboardKey = {SDL_SCANCODE_DOWN, 0};
-        GNW95_process_key(&simulatedKeyboardKey);
+    case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+        gDpadDown = false;
+        if (gLeftTriggerValue >= kChordTriggerThreshold) {
+            ReleaseChordKey();
+        } else {
+            simulatedKeyboardKey = {SDL_SCANCODE_DOWN, 0};
+            GNW95_process_key(&simulatedKeyboardKey);
+        }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: // Menu/Map Left (Left Arrow)
-        simulatedKeyboardKey = {SDL_SCANCODE_LEFT, 0};
-        GNW95_process_key(&simulatedKeyboardKey);
+    case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+        gDpadLeft = false;
+        if (gLeftTriggerValue >= kChordTriggerThreshold) {
+            ReleaseChordKey();
+        } else {
+            simulatedKeyboardKey = {SDL_SCANCODE_LEFT, 0};
+            GNW95_process_key(&simulatedKeyboardKey);
+        }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: // Menu/Map Right (Right Arrow)
-        simulatedKeyboardKey = {SDL_SCANCODE_RIGHT, 0};
-        GNW95_process_key(&simulatedKeyboardKey);
+    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+        gDpadRight = false;
+        if (gLeftTriggerValue >= kChordTriggerThreshold) {
+            ReleaseChordKey();
+        } else {
+            simulatedKeyboardKey = {SDL_SCANCODE_RIGHT, 0};
+            GNW95_process_key(&simulatedKeyboardKey);
+        }
         break;
 
     default:
@@ -354,7 +439,7 @@ void HandleControllerButtonDown(const SDL_Event& event)
     KeyboardData simulatedKeyboardKey = {0, 0};
     switch (event.cbutton.button) {
     case SDL_CONTROLLER_BUTTON_A: // Left Click
-        gGamepadLeftClick = 1;
+        gAButtonHeld = true;
         break;
 
     case SDL_CONTROLLER_BUTTON_B: // Right Click
@@ -371,8 +456,8 @@ void HandleControllerButtonDown(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_BACK: // Help Screen (F1)
-        simulatedKeyboardKey = {SDL_SCANCODE_F1, 1};
+    case SDL_CONTROLLER_BUTTON_BACK: // Toggle Active Items (B)
+        simulatedKeyboardKey = {SDL_SCANCODE_B, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -381,8 +466,8 @@ void HandleControllerButtonDown(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_LEFTSTICK: // Enter Combat Mode (A) 
-        simulatedKeyboardKey = {SDL_SCANCODE_A, 1};
+    case SDL_CONTROLLER_BUTTON_LEFTSTICK: // Skilldex (S)
+        simulatedKeyboardKey = {SDL_SCANCODE_S, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -401,29 +486,100 @@ void HandleControllerButtonDown(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_UP: // Menu/Map Up (Up Arrow)
-        simulatedKeyboardKey = {SDL_SCANCODE_UP, 1};
-        GNW95_process_key(&simulatedKeyboardKey);
+    // D-pad: update held state, then either fire the chord digit key (trigger held)
+    // or send the normal arrow key.
+    //
+    // Chord mapping (left trigger + d-pad, clockwise from Up):
+    //   Up=1  Up+Right=2  Right=3  Down+Right=4
+    //   Down=5  Down+Left=6  Left=7  Up+Left=8
+    //
+    // For diagonals the second button pressed resolves the final chord key.
+    // The previous chord key is always released before the new one fires so
+    // the game never sees two digit keys down at once.
+    case SDL_CONTROLLER_BUTTON_DPAD_UP:
+        gDpadUp = true;
+        if (gLeftTriggerValue >= kChordTriggerThreshold) {
+            ReleaseChordKey();
+            gLeftTriggerChordKey = GetDpadChordScancode();
+            if (gLeftTriggerChordKey != SDL_SCANCODE_UNKNOWN) {
+                simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
+                GNW95_process_key(&simulatedKeyboardKey);
+            }
+        } else {
+            simulatedKeyboardKey = {SDL_SCANCODE_UP, 1};
+            GNW95_process_key(&simulatedKeyboardKey);
+        }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_DOWN: // Menu/Map Down (Down Arrow)
-        simulatedKeyboardKey = {SDL_SCANCODE_DOWN, 1};
-        GNW95_process_key(&simulatedKeyboardKey);
+    case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+        gDpadDown = true;
+        if (gLeftTriggerValue >= kChordTriggerThreshold) {
+            ReleaseChordKey();
+            gLeftTriggerChordKey = GetDpadChordScancode();
+            if (gLeftTriggerChordKey != SDL_SCANCODE_UNKNOWN) {
+                simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
+                GNW95_process_key(&simulatedKeyboardKey);
+            }
+        } else {
+            simulatedKeyboardKey = {SDL_SCANCODE_DOWN, 1};
+            GNW95_process_key(&simulatedKeyboardKey);
+        }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_LEFT: // Menu/Map Right (Right Arrow)
-        simulatedKeyboardKey = {SDL_SCANCODE_LEFT, 1};
-        GNW95_process_key(&simulatedKeyboardKey);
+    case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+        gDpadLeft = true;
+        if (gLeftTriggerValue >= kChordTriggerThreshold) {
+            ReleaseChordKey();
+            gLeftTriggerChordKey = GetDpadChordScancode();
+            if (gLeftTriggerChordKey != SDL_SCANCODE_UNKNOWN) {
+                simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
+                GNW95_process_key(&simulatedKeyboardKey);
+            }
+        } else {
+            simulatedKeyboardKey = {SDL_SCANCODE_LEFT, 1};
+            GNW95_process_key(&simulatedKeyboardKey);
+        }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: // Menu/Map Right (Right Arrow)
-        simulatedKeyboardKey = {SDL_SCANCODE_RIGHT, 1};
-        GNW95_process_key(&simulatedKeyboardKey);
+    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+        gDpadRight = true;
+        if (gLeftTriggerValue >= kChordTriggerThreshold) {
+            ReleaseChordKey();
+            gLeftTriggerChordKey = GetDpadChordScancode();
+            if (gLeftTriggerChordKey != SDL_SCANCODE_UNKNOWN) {
+                simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
+                GNW95_process_key(&simulatedKeyboardKey);
+            }
+        } else {
+            simulatedKeyboardKey = {SDL_SCANCODE_RIGHT, 1};
+            GNW95_process_key(&simulatedKeyboardKey);
+        }
         break;
 
     default:
         break;
     }
+}
+
+void GamepadInit()
+{
+    // Read gamepad settings from the [control] section of the game config.
+    // If a key is absent the variable retains its default value.
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_DEADZONE_KEY,  &gLeftStickDeadzonePercent);
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_DEADZONE_KEY, &gRightStickDeadzonePercent);
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY,  &gLeftStickSensitivity);
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_SENSITIVITY_KEY, &gRightStickSensitivity);
+
+    // Clamp deadzone to a sane range so a bad config value can't break input.
+    gLeftStickDeadzonePercent  = std::max(0, std::min(95, gLeftStickDeadzonePercent));
+    gRightStickDeadzonePercent = std::max(0, std::min(95, gRightStickDeadzonePercent));
+    // Sensitivity divisor must be at least 1 to avoid division by zero.
+    gLeftStickSensitivity  = std::max(1, gLeftStickSensitivity);
+    gRightStickSensitivity = std::max(1, gRightStickSensitivity);
+
+    debug_printf("Gamepad config: left_deadzone=%d%% right_deadzone=%d%% left_sensitivity=%d right_sensitivity=%d\n",
+        gLeftStickDeadzonePercent, gRightStickDeadzonePercent,
+        gLeftStickSensitivity, gRightStickSensitivity);
 }
 
 void ProcessLeftStick()
@@ -435,11 +591,34 @@ void ProcessLeftStick()
         return;
     }
 
+    // Destiny-style acceleration curve: square the input while preserving sign.
+    // At half deflection this gives 25% speed; at full deflection, 100%.
+    // Combined with the deadzone this means the first ~20% of physical travel is
+    // dead, the next chunk gives fine precision, and the outer range is fast —
+    // matching the feel of the menu pointer in Destiny 2 / AC Origins.
+    // Applied before the speed brake so the trigger still scales the curved output.
+    auto curve = [](float v) { return v * std::abs(v); };
+
+    // Left trigger acts as an analog speed brake.
+    // At 0% trigger: full speed (multiplier 1.0).
+    // At 100% trigger: quarter speed (multiplier 0.25).
+    // The multiplier scales linearly between these extremes.
+    const float speedMult = 1.0f - gLeftTriggerValue * 0.75f;
+
+    // Temporarily scale stick values so the accumulator sees the curved, braked velocity.
+    const float savedX = leftStickX;
+    const float savedY = leftStickY;
+    leftStickX = curve(leftStickX) * speedMult;
+    leftStickY = curve(leftStickY) * speedMult;
+
     int x, y;
     SDL_GetRelativeMouseState(&x, &y);
     int newX = x;
     int newY = y;
-    acc.Pool(&newX, &newY, 2);
+    acc.Pool(&newX, &newY, gLeftStickSensitivity);
+
+    leftStickX = savedX;
+    leftStickY = savedY;
 
     if (newX != x || newY != y) {
         gLeftStickDeltaX += (newX - x);
@@ -461,6 +640,21 @@ void ProcessRightStick()
     if (acc.GetScrollDelta(&dx, &dy, 50)) {
         map_scroll(dx, dy);
     }
+}
+
+void ProcessTriggers()
+{
+    // Minimum analog value to consider the right trigger "engaged".
+    const float kDeadzone = 0.05f;
+
+    // Right trigger: simple left mouse click held for as long as the trigger is pressed.
+    // Release any held shift from old logic defensively.
+    if (gRightTriggerShiftHeld) {
+        KeyboardData shiftUp = {SDL_SCANCODE_LSHIFT, 0};
+        GNW95_process_key(&shiftUp);
+        gRightTriggerShiftHeld = false;
+    }
+    gGamepadLeftClick = (gRightTriggerValue >= kDeadzone || gAButtonHeld) ? 1 : 0;
 }
 
 

@@ -31,6 +31,7 @@
 #include "plib/gnw/memory.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
+#include <xboxkrnl/xboxkrnl.h>
 
 namespace fallout {
 
@@ -1803,7 +1804,7 @@ static void SetSystemPrefs()
     config_get_value(&game_config, GAME_CONFIG_SOUND_KEY, GAME_CONFIG_SPEECH_VOLUME_KEY, &speech_volume);
     config_get_double(&game_config, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_BRIGHTNESS_KEY, &gamma_value);
     config_get_double(&game_config, GAME_CONFIG_PREFERENCES_KEY, GAME_CONFIG_MOUSE_SENSITIVITY_KEY, &mouse_sens);
-
+    DbgPrint("Combat Speed: %d\n", combat_speed);
     JustUpdate();
 }
 

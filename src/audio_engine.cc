@@ -104,7 +104,7 @@ bool audioEngineInit()
     desiredSpec.format = AUDIO_S16;
     desiredSpec.channels = 2;
 #ifdef NXDK
-    desiredSpec.samples = 2048; // NXDK TODO Fixes audio crackling but may be causing FMV stuttering?
+    desiredSpec.samples = 4096; // NXDK TODO Fixes audio crackling but may be causing FMV stuttering?
 #else
     desiredSpec.samples = 1024;
 #endif
