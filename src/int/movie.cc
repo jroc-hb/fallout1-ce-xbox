@@ -315,15 +315,18 @@ static void movie_MVE_ShowFrame(SDL_Surface* surface, int srcWidth, int srcHeigh
 
     SDL_SetSurfacePalette(surface, gSdlSurface->format->palette);
     SDL_BlitSurface(surface, &srcRect, gSdlSurface, &destRect);
-    SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
-    
+
 #ifdef NXDK
-    // Xbox: Use helper functions to temporarily unlock texture for movie playback
+    // gSdlTextureSurface is not allocated on Xbox; convert gSdlSurface directly
+    // into the locked texture, then unlock it so renderPresent can submit the frame.
+    svgaConvertSurfaceToTexture();
     movieFrameStart();
+#else
+    SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
 #endif
-    
+
     renderPresent();
-    
+
 #ifdef NXDK
     movieFrameEnd();
 #endif

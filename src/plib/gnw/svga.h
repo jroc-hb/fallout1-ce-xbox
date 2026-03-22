@@ -31,9 +31,9 @@ void handleWindowSizeChanged();
 void renderPresent();
 
 #ifdef NXDK
-// Movie playback support functions
 void movieFrameStart();
 void movieFrameEnd();
+void svgaConvertSurfaceToTexture();
 #endif
 
 } // namespace fallout
