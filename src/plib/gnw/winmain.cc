@@ -97,6 +97,12 @@ static void EnsureFileCopy(const char* src, const char* dst) {
         DbgPrint("CopyFileA %s: %s\n", dst, ok ? "success" : "failed");
         assert(ok);
     }
+
+    // Ensure the file is writable so config_save can open with "wb".
+    DWORD attr = GetFileAttributesA(dst);
+    if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_READONLY)) {
+        SetFileAttributesA(dst, (attr & ~FILE_ATTRIBUTE_READONLY) | FILE_ATTRIBUTE_ARCHIVE);
+    }
 }
 #endif
 
@@ -135,6 +141,11 @@ int main(int argc, char* argv[])
     // Register save dir metadata
     EnsureFileCopy("D:\\TitleImage.xbx", "E:\\UDATA\\FALLOUT1\\TitleImage.xbx");
     fallout::create_root_titlemeta();
+
+    // Custom main menu background for xbox options section
+    EnsureDir("E:\\UDATA\\FALLOUT1\\data\\art");
+    EnsureDir("E:\\UDATA\\FALLOUT1\\data\\art\\intrface");
+    EnsureFileCopy("D:\\DATA\\art\\intrface\\MAINMENU.FRM", "E:\\UDATA\\FALLOUT1\\DATA\\art\\intrface\\MAINMENU.FRM");
 
     // Recursive directory copier
     auto CopyDirRecursive = [](const char* srcDir, const char* dstDir, auto& self) {

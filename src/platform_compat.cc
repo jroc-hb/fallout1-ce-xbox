@@ -348,7 +348,17 @@ FILE* compat_fopen(const char* path, const char* mode)
         fp = fopen(nativePath, "rb");
     } else if (strcmp(mode, "wt") == 0) {
         // NXDK seemingly doesn't support "wt" mode, so we use "wb" instead
+        debug_printf("compat_fopen: creating file %s\n", nativePath);
+
+        // If the file exists and is read-only, make it writable to allow save.
+        DWORD attr = GetFileAttributesA(nativePath);
+        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_READONLY)) {
+            SetFileAttributesA(nativePath, (attr & ~FILE_ATTRIBUTE_READONLY) | FILE_ATTRIBUTE_ARCHIVE);
+            debug_printf("compat_fopen: cleared READONLY on %s\n", nativePath);
+        }
+
         fp = fopen(nativePath, "wb");
+        debug_printf("compat_fopen: fopen result for file %s -> %p\n", nativePath, fp);
     } else {
         fp = fopen(nativePath, mode);
     }

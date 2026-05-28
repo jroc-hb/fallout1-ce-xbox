@@ -44,7 +44,11 @@
 #include "plib/gnw/intrface.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
-
+#ifdef NXDK
+#include "plib/gnw/gamepad.hpp"
+#include <hal/xbox.h>
+#include <windows.h>
+#endif
 
 namespace fallout {
 
@@ -62,6 +66,7 @@ static bool main_selfrun_init();
 static void main_selfrun_exit();
 static void main_selfrun_record();
 static void main_selfrun_play();
+static void xbox_options_menu();
 static void main_death_scene();
 static void main_death_voiceover_callback();
 
@@ -197,6 +202,12 @@ int gnw_main(int argc, char** argv)
                 main_menu_hide(true);
                 credits("credits.txt", -1, false);
                 break;
+#ifdef NXDK
+            case MAIN_MENU_OPTIONS:
+                main_menu_hide(false);
+                xbox_options_menu();
+                break;
+#endif
             case MAIN_MENU_QUOTES:
                 if (language_filter == 0) {
                     main_menu_hide(true);
@@ -356,6 +367,211 @@ static void main_game_loop()
         mouse_hide();
     }
 }
+
+#ifdef NXDK
+static void xbox_options_menu()
+{
+    debug_printf("xbox_options_menu\n");
+    int oldFont = text_curr();
+    text_font(104);
+
+    const char* f1ResPath = "E:\\UDATA\\FALLOUT1\\f1_res.ini";
+
+    int resolutionChoice = 0; // 0: 640x480, 1: 1280x720
+    int leftDeadzone = 20;
+    int rightDeadzone = 20;
+    int leftSensitivity = 50;
+    int rightSensitivity = 50;
+
+    int initialResolutionChoice = 0;
+    Config resolutionConfig;
+    if (config_init(&resolutionConfig)) {
+        if (config_load(&resolutionConfig, f1ResPath, false)) {
+            int w;
+            int h;
+            if (config_get_value(&resolutionConfig, "MAIN", "SCR_WIDTH", &w) &&
+                config_get_value(&resolutionConfig, "MAIN", "SCR_HEIGHT", &h)) {
+                if (w == 1280 && h == 720) {
+                    resolutionChoice = 1;
+                }
+            }
+        }
+        config_exit(&resolutionConfig);
+    }
+    initialResolutionChoice = resolutionChoice;
+
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_DEADZONE_KEY, &leftDeadzone);
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_DEADZONE_KEY, &rightDeadzone);
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY, &leftSensitivity);
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_SENSITIVITY_KEY, &rightSensitivity);
+
+    const int windowWidth = 560;
+    const int windowHeight = 340;
+
+    int win = win_add((screenGetWidth() - windowWidth) / 2,
+        (screenGetHeight() - windowHeight) / 2,
+        windowWidth,
+        windowHeight,
+        256,
+        WINDOW_MODAL | WINDOW_DONT_MOVE_TOP);
+
+    if (win == -1) {
+        text_font(oldFont);
+        return;
+    }
+
+    bool done = false;
+    bool save = false;
+    int selected = 0;
+    const int itemsCount = 5;
+
+    while (!done) {
+        win_fill(win, 0, 0, windowWidth, windowHeight, 0x100 | 1);
+        win_box(win, 0, 0, windowWidth - 1, windowHeight - 1, 0x100 | 0);
+
+        win_print(win, "XBOX OPTIONS", 0, 200, 16, colorTable[18917]);
+
+        char tmp[64];
+        const char* resStr = resolutionChoice == 0 ? "640x480" : "1280x720";
+        snprintf(tmp, sizeof(tmp), "Resolution (Will Relaunch): %s", resStr);
+        win_print(win, tmp, 0, 16, 55, colorTable[21091]);
+        win_box(win, 16, 80, 520, 100, 0x100 | 0);
+        int resFill = resolutionChoice ? 503 : 260;
+        win_fill(win, 17, 81, resFill, 19, 0x100 | 3);
+        if (selected == 0) {
+            win_box(win, 14, 78, 522, 102, colorTable[24519]);
+        }
+
+        snprintf(tmp, sizeof(tmp), "Left stick deadzone: %d%%", leftDeadzone);
+        win_print(win, tmp, 0, 16, 110, colorTable[21091]);
+        win_box(win, 16, 135, 520, 155, 0x100 | 0);
+        int leftDeadzoneFill = (leftDeadzone * 504) / 95;
+        win_fill(win, 18, 137, leftDeadzoneFill, 18, 0x100 | 3);
+        if (selected == 1) {
+            win_box(win, 14, 133, 522, 157, colorTable[24519]);
+        }
+
+        snprintf(tmp, sizeof(tmp), "Right stick deadzone: %d%%", rightDeadzone);
+        win_print(win, tmp, 0, 16, 160, colorTable[21091]);
+        win_box(win, 16, 185, 520, 205, 0x100 | 0);
+        int rightDeadzoneFill = (rightDeadzone * 504) / 95;
+        win_fill(win, 18, 187, rightDeadzoneFill, 18, 0x100 | 3);
+        if (selected == 2) {
+            win_box(win, 14, 183, 522, 207, colorTable[24519]);
+        }
+
+        snprintf(tmp, sizeof(tmp), "Left stick sensitivity: %d", leftSensitivity);
+        win_print(win, tmp, 0, 16, 210, colorTable[21091]);
+        win_box(win, 16, 235, 520, 255, 0x100 | 0);
+        int leftSensFill = ((leftSensitivity - 1) * 504) / 99;
+        win_fill(win, 18, 237, leftSensFill, 18, 0x100 | 3);
+        if (selected == 3) {
+            win_box(win, 14, 233, 522, 257, colorTable[24519]);
+        }
+
+        snprintf(tmp, sizeof(tmp), "Right stick sensitivity: %d", rightSensitivity);
+        win_print(win, tmp, 0, 16, 260, colorTable[21091]);
+        win_box(win, 16, 285, 520, 305, 0x100 | 0);
+        int rightSensFill = ((rightSensitivity - 1) * 504) / 99;
+        win_fill(win, 18, 287, rightSensFill, 18, 0x100 | 3);
+        if (selected == 4) {
+            win_box(win, 14, 283, 522, 307, colorTable[24519]);
+        }
+
+        win_print(win, "APPLY (START)", 0, 45, 310, colorTable[992]);
+        win_print(win, "CANCEL (BACK)", 0, 320, 310, colorTable[31744]); // red
+
+        win_draw(win);
+
+        int keyCode = get_input();
+        switch (keyCode) {
+        case KEY_ARROW_UP:
+            selected = (selected - 1 + itemsCount) % itemsCount;
+            break;
+        case KEY_ARROW_DOWN:
+            selected = (selected + 1) % itemsCount;
+            break;
+        case KEY_ARROW_LEFT:
+            if (selected == 0) {
+                resolutionChoice = 0;
+            } else if (selected == 1) {
+                leftDeadzone = std::max(0, leftDeadzone - 1);
+            } else if (selected == 2) {
+                rightDeadzone = std::max(0, rightDeadzone - 1);
+            } else if (selected == 3) {
+                leftSensitivity = std::max(1, leftSensitivity - 1);
+            } else if (selected == 4) {
+                rightSensitivity = std::max(1, rightSensitivity - 1);
+            }
+            break;
+        case KEY_ARROW_RIGHT:
+            if (selected == 0) {
+                resolutionChoice = 1;
+            } else if (selected == 1) {
+                leftDeadzone = std::min(95, leftDeadzone + 1);
+            } else if (selected == 2) {
+                rightDeadzone = std::min(95, rightDeadzone + 1);
+            } else if (selected == 3) {
+                leftSensitivity = std::min(100, leftSensitivity + 1);
+            } else if (selected == 4) {
+                rightSensitivity = std::min(100, rightSensitivity + 1);
+            }
+            break;
+        case KEY_ESCAPE:
+            debug_printf("Save selected\n");
+            save = true;
+            done = true;
+            break;
+        case KEY_LOWERCASE_B:
+            debug_printf("Back selected\n");
+            save = false;
+            done = true;
+            break;
+        default:
+            break;
+        }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
+    }
+
+    if (save) {
+        bool resolutionChanged = (resolutionChoice != initialResolutionChoice);
+
+        debug_printf("Saving options: resolutionChoice=%d, leftDeadzone=%d, rightDeadzone=%d, leftSensitivity=%d, rightSensitivity=%d\n",
+            resolutionChoice, leftDeadzone, rightDeadzone, leftSensitivity, rightSensitivity);
+        config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_DEADZONE_KEY, leftDeadzone);
+        config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_DEADZONE_KEY, rightDeadzone);
+        config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY, leftSensitivity);
+        config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_SENSITIVITY_KEY, rightSensitivity);
+
+        gconfig_save();
+        GamepadInit();
+
+        if (config_init(&resolutionConfig)) {
+            debug_printf("Saving resolution to %s\n", f1ResPath);
+            config_load(&resolutionConfig, f1ResPath, false);
+            if (resolutionChoice == 0) {
+                config_set_value(&resolutionConfig, "MAIN", "SCR_WIDTH", 640);
+                config_set_value(&resolutionConfig, "MAIN", "SCR_HEIGHT", 480);
+            } else {
+                config_set_value(&resolutionConfig, "MAIN", "SCR_WIDTH", 1280);
+                config_set_value(&resolutionConfig, "MAIN", "SCR_HEIGHT", 720);
+            }
+            config_save(&resolutionConfig, f1ResPath, false);
+            config_exit(&resolutionConfig);
+        }
+
+        if (resolutionChanged) {
+            debug_printf("Resolution changed, relaunching default.xbe\n");
+            XLaunchXBE(".\\default.xbe");
+        }
+    }
+
+    win_delete(win);
+    text_font(oldFont);
+}
+#endif
 
 // 0x472AE8
 static bool main_selfrun_init()

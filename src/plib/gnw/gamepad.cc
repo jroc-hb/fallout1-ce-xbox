@@ -19,27 +19,24 @@ namespace fallout {
 static SDL_GameController* gController = nullptr;
 
 // Gamepad settings read from config on init.
-// Deadzone is stored as a whole-number percentage (0-100) and converted to [0.0..1.0] at use.
-// Sensitivity is the inverse-speed divisor passed to the stick accumulators:
-//   higher = slower.
+// Deadzone: whole-number percentage (0-100), converted to [0.0..1.0] at use.
+// Sensitivity: user-facing 1-100 scale where 50 is the default and higher means faster.
+//   Converted at init to an internal divisor — see GamepadInit.
 //
-// Deadzone (20%): masks drift on worn OG Xbox controllers without cutting into usable
-//   analog range near centre.
+// Left stick default (40): maps to internal divisor 2.0. Linear input — stick
+//   deflection maps directly to cursor speed, uniform in all directions.
 //
-// Left stick sensitivity (3): at full deflection the cursor travels ~320px/s on
-//   Fallout 1's 640x480 resolution. The Destiny-style acceleration curve (v*|v|)
-//   means half-deflection gives ~80px/s for fine precision, scaling up to full
-//   speed only at the outer range of travel.
-//
-// Right stick sensitivity (16): pixel-speed divisor for map_scroll_pixels().
-//   pixel_delta_per_frame = stickValue * dtc_ms / sensitivity
-//   At full deflection and 16ms frames (60fps): 16/16 = 1px/frame = ~60px/sec.
-//   This gives smooth sub-tile scrolling at a comfortable pan speed.
-//   Halve the value to double the speed.
+// Right stick default (40): maps to internal divisor 50.0.
+//   Accumulates stickValue * dt each frame; a scroll step fires when the
+//   accumulator crosses the divisor. At full deflection: ~20 tile-steps/sec.
 static int gLeftStickDeadzonePercent  = 20;
 static int gRightStickDeadzonePercent = 20;
-static int gLeftStickSensitivity      = 3;
-static int gRightStickSensitivity     = 50; // 16 og
+static int gLeftStickSensitivity      = 40;
+static int gRightStickSensitivity     = 40;
+
+// Internal divisors derived from the 1-100 sensitivity values in GamepadInit.
+static float gLeftStickInternalDivisor  = 2.0f;
+static float gRightStickInternalDivisor = 50.0f;
 
 // Simulated mouse state using gamepad inputs
 int gGamepadLeftClick = 0;
@@ -181,52 +178,41 @@ void ReleaseChordKey()
 
     struct RightStickAccumulator {
         RightStickAccumulator()
-        {
-            lastTc = SDL_GetTicks();
-            hiresDX = 0;
-            hiresDY = 0;
-        }
+            : lastTc(SDL_GetTicks()), hiresDX(0.0f), hiresDY(0.0f)
+        {}
 
-        bool GetScrollDelta(int* outX, int* outY, int slowdown)
+        bool GetScrollDelta(int* outX, int* outY, float divisor)
         {
             const Uint32 tc = SDL_GetTicks();
-            const int dtc = tc - lastTc;
+            const int dtc = static_cast<int>(tc - lastTc);
             lastTc = tc;
 
             hiresDX += rightStickX * dtc;
             hiresDY += rightStickY * dtc;
 
-            int dx = static_cast<int>(hiresDX / slowdown);
-            int dy = static_cast<int>(hiresDY / slowdown);
-
-            // If both stick axes are being pushed, enforce a diagonal
-            const float diagThreshold = 0.3f;  // analog stick strength
-
-            bool diagonalIntent =
-                std::abs(rightStickX) > diagThreshold &&
-                std::abs(rightStickY) > diagThreshold;
+            static constexpr float kDiagThreshold = 0.3f;
+            const bool diagonalIntent = std::abs(rightStickX) > kDiagThreshold
+                                     && std::abs(rightStickY) > kDiagThreshold;
 
             if (diagonalIntent) {
-                if (std::abs(hiresDX) >= slowdown || std::abs(hiresDY) >= slowdown) {
-                    *outX = (rightStickX > 0) ? 1 : -1;
-                    *outY = (rightStickY > 0) ? -1 : 1;
-
-                    hiresDX = 0;
-                    hiresDY = 0;
+                if (std::abs(hiresDX) >= divisor || std::abs(hiresDY) >= divisor) {
+                    *outX = (rightStickX > 0.0f) ? 1 : -1;
+                    *outY = (rightStickY > 0.0f) ? -1 : 1;
+                    hiresDX = 0.0f;
+                    hiresDY = 0.0f;
                     return true;
                 }
-            }
-            else {
-                if (std::abs(hiresDX) >= slowdown) {
-                    *outX = (hiresDX > 0) ? 1 : -1;
+            } else {
+                if (std::abs(hiresDX) >= divisor) {
+                    *outX = (hiresDX > 0.0f) ? 1 : -1;
                     *outY = 0;
-                    hiresDX = 0;
+                    hiresDX = 0.0f;
                     return true;
                 }
-                if (std::abs(hiresDY) >= slowdown) {
+                if (std::abs(hiresDY) >= divisor) {
                     *outX = 0;
-                    *outY = (hiresDY > 0) ? -1 : 1;
-                    hiresDY = 0;
+                    *outY = (hiresDY > 0.0f) ? -1 : 1;
+                    hiresDY = 0.0f;
                     return true;
                 }
             }
@@ -236,12 +222,14 @@ void ReleaseChordKey()
 
         void Clear()
         {
-            lastTc = SDL_GetTicks();
+            lastTc  = SDL_GetTicks();
+            hiresDX = 0.0f;
+            hiresDY = 0.0f;
         }
 
-        uint32_t lastTc;
-        float hiresDX;
-        float hiresDY;
+        Uint32 lastTc;
+        float  hiresDX;
+        float  hiresDY;
     };
 
     struct LeftStickAccumulator {
@@ -253,7 +241,7 @@ void ReleaseChordKey()
             hiresDY = 0;
         }
 
-        void Pool(int* x, int* y, int slowdown)
+        void Pool(int* x, int* y, float slowdown)
         {
             const Uint32 tc = SDL_GetTicks();
             const int dtc = tc - lastTc;
@@ -264,14 +252,15 @@ void ReleaseChordKey()
             *x += dx;
             *y -= dy;
             lastTc = tc;
-            // keep track of remainder for sub-pixel motion
             hiresDX -= dx * slowdown;
             hiresDY -= dy * slowdown;
         }
 
         void Clear()
         {
-            lastTc = SDL_GetTicks();
+            lastTc  = SDL_GetTicks();
+            hiresDX = 0.0f;
+            hiresDY = 0.0f;
         }
 
         uint32_t lastTc;
@@ -573,49 +562,44 @@ void GamepadInit()
     // Clamp deadzone to a sane range so a bad config value can't break input.
     gLeftStickDeadzonePercent  = std::max(0, std::min(95, gLeftStickDeadzonePercent));
     gRightStickDeadzonePercent = std::max(0, std::min(95, gRightStickDeadzonePercent));
-    // Sensitivity divisor must be at least 1 to avoid division by zero.
-    gLeftStickSensitivity  = std::max(1, gLeftStickSensitivity);
-    gRightStickSensitivity = std::max(1, gRightStickSensitivity);
+    // Clamp sensitivity to 1-100; 0 would produce a division-by-zero in the conversion.
+    gLeftStickSensitivity  = std::max(1, std::min(100, gLeftStickSensitivity));
+    gRightStickSensitivity = std::max(1, std::min(100, gRightStickSensitivity));
 
-    debug_printf("Gamepad config: left_deadzone=%d%% right_deadzone=%d%% left_sensitivity=%d right_sensitivity=%d\n",
+    // Convert 1-100 user values to internal divisors. 50 == default behaviour.
+    // Higher user value = larger divisor at 50, smaller above — i.e. faster.
+    gLeftStickInternalDivisor  = (50.0f / static_cast<float>(gLeftStickSensitivity))  * 2.0f;
+    gRightStickInternalDivisor = (50.0f / static_cast<float>(gRightStickSensitivity)) * 50.0f;
+
+    debug_printf("Gamepad config: left_deadzone=%d%% right_deadzone=%d%% left_sensitivity=%d (divisor=%.2f) right_sensitivity=%d (divisor=%.2f)\n",
         gLeftStickDeadzonePercent, gRightStickDeadzonePercent,
-        gLeftStickSensitivity, gRightStickSensitivity);
+        gLeftStickSensitivity, gLeftStickInternalDivisor,
+        gRightStickSensitivity, gRightStickInternalDivisor);
 }
 
 void ProcessLeftStick()
 {
     static LeftStickAccumulator acc;
-    // deadzone is handled in ScaleJoystickAxes() already
     if (leftStickX == 0 && leftStickY == 0) {
         acc.Clear();
         return;
     }
 
-    // Destiny-style acceleration curve: square the input while preserving sign.
-    // At half deflection this gives 25% speed; at full deflection, 100%.
-    // Combined with the deadzone this means the first ~20% of physical travel is
-    // dead, the next chunk gives fine precision, and the outer range is fast —
-    // matching the feel of the menu pointer in Destiny 2 / AC Origins.
-    // Applied before the speed brake so the trigger still scales the curved output.
-    auto curve = [](float v) { return v * std::abs(v); };
-
     // Left trigger acts as an analog speed brake.
     // At 0% trigger: full speed (multiplier 1.0).
     // At 100% trigger: quarter speed (multiplier 0.25).
-    // The multiplier scales linearly between these extremes.
     const float speedMult = 1.0f - gLeftTriggerValue * 0.75f;
 
-    // Temporarily scale stick values so the accumulator sees the curved, braked velocity.
     const float savedX = leftStickX;
     const float savedY = leftStickY;
-    leftStickX = curve(leftStickX) * speedMult;
-    leftStickY = curve(leftStickY) * speedMult;
+    leftStickX *= speedMult;
+    leftStickY *= speedMult;
 
     int x, y;
     SDL_GetRelativeMouseState(&x, &y);
     int newX = x;
     int newY = y;
-    acc.Pool(&newX, &newY, gLeftStickSensitivity);
+    acc.Pool(&newX, &newY, gLeftStickInternalDivisor);
 
     leftStickX = savedX;
     leftStickY = savedY;
@@ -629,15 +613,14 @@ void ProcessLeftStick()
 void ProcessRightStick()
 {
     static RightStickAccumulator acc;
-    int dx = 0, dy = 0;
 
-    // Skip when stick is neutral
-    if (rightStickX == 0 && rightStickY == 0) {
+    if (rightStickX == 0.0f && rightStickY == 0.0f) {
         acc.Clear();
         return;
     }
 
-    if (acc.GetScrollDelta(&dx, &dy, 50)) {
+    int dx = 0, dy = 0;
+    if (acc.GetScrollDelta(&dx, &dy, gRightStickInternalDivisor)) {
         map_scroll(dx, dy);
     }
 }

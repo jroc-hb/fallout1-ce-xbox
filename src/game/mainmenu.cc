@@ -29,6 +29,9 @@ typedef enum MainMenuButton {
     MAIN_MENU_BUTTON_LOAD_GAME,
     MAIN_MENU_BUTTON_CREDITS,
     MAIN_MENU_BUTTON_EXIT,
+#ifdef NXDK
+    MAIN_MENU_BUTTON_XBOX_OPTIONS,
+#endif
     MAIN_MENU_BUTTON_COUNT,
 } MainMenuButton;
 
@@ -66,6 +69,9 @@ static int button_values[MAIN_MENU_BUTTON_COUNT] = {
     KEY_LOWERCASE_L,
     KEY_LOWERCASE_C,
     KEY_LOWERCASE_E,
+#ifdef NXDK
+    KEY_LOWERCASE_O,
+#endif
 };
 
 // 0x505AB8
@@ -75,6 +81,9 @@ static int return_values[MAIN_MENU_BUTTON_COUNT] = {
     MAIN_MENU_LOAD_GAME,
     MAIN_MENU_CREDITS,
     MAIN_MENU_EXIT,
+#ifdef NXDK
+    MAIN_MENU_OPTIONS,
+#endif
 };
 
 // 0x612DC8
@@ -204,6 +213,27 @@ int main_menu_create()
     text_font(104);
 
     for (int index = 0; index < MAIN_MENU_BUTTON_COUNT; index++) {
+    #ifdef NXDK
+        if (index == MAIN_MENU_BUTTON_XBOX_OPTIONS) {
+            const char* str = "XBOX OPTS";
+            len = text_width(str);
+            text_to_buf(main_window_buf + MAIN_MENU_WINDOW_WIDTH * (42 * index - index + 46) + 520 - (len / 2),
+                str,
+                MAIN_MENU_WINDOW_WIDTH - (520 - (len / 2)) - 1,
+                MAIN_MENU_WINDOW_WIDTH,
+                colorTable[21091]);
+        } else {
+            msg.num = 9 + index;
+            if (message_search(&misc_message_file, &msg)) {
+                len = text_width(msg.text);
+                text_to_buf(main_window_buf + MAIN_MENU_WINDOW_WIDTH * (42 * index - index + 46) + 520 - (len / 2),
+                    msg.text,
+                    MAIN_MENU_WINDOW_WIDTH - (520 - (len / 2)) - 1,
+                    MAIN_MENU_WINDOW_WIDTH,
+                    colorTable[21091]);
+            }
+        }
+    #else
         msg.num = 9 + index;
         if (message_search(&misc_message_file, &msg)) {
             len = text_width(msg.text);
@@ -213,6 +243,7 @@ int main_menu_create()
                 MAIN_MENU_WINDOW_WIDTH,
                 colorTable[21091]);
         }
+    #endif
     }
 
     text_font(oldFont);
