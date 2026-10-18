@@ -210,7 +210,13 @@ bool svga_init(VideoOptions* video_options)
     }
 
 #ifdef NXDK
-    SDL_WindowFlags windowFlags = SDL_WINDOW_FULLSCREEN;
+    // Deliberately not SDL_WINDOW_FULLSCREEN: SDL3 replaces a fullscreen
+    // window's requested size with the display bounds, and the nxdk driver's
+    // primary display is 640x480, so the f1_res.ini resolution would never
+    // reach it. The driver makes the window fullscreen on its own and sets the
+    // video mode from the size requested here (640x480 -> 480p, 1280x720 or
+    // larger -> 720p).
+    SDL_WindowFlags windowFlags = 0;
 #else
     SDL_WindowFlags windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (video_options->fullscreen) {
