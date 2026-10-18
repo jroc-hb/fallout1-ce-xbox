@@ -16,15 +16,17 @@ static int gMouseWheelDeltaY = 0;
 // 0x4E0400
 bool dxinput_init()
 {
+    // Promotes joysticks SDL doesn't recognise - the Original Xbox controller
+    // among them - to gamepads. This has to happen before the joystick
+    // subsystem starts: a pad that is already plugged in is detected during
+    // init, and SDL caches it as "not a gamepad". Adding a "default" mapping
+    // afterwards doesn't re-announce it, so no SDL_EVENT_GAMEPAD_ADDED would
+    // arrive until the pad was unplugged and plugged back in.
+    GamepadRegisterDefaultMapping();
+
     if (!SDL_InitSubSystem(SDL_INIT_EVENTS | SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD)) {
         return false;
     }
-
-    // Promotes joysticks SDL doesn't recognise - the Original Xbox controller
-    // among them - to gamepads. Registering the mapping after init is fine:
-    // SDL re-evaluates already attached joysticks and emits the
-    // SDL_EVENT_GAMEPAD_ADDED events the input loop is waiting for.
-    GamepadRegisterDefaultMapping();
 
     if (!dxinput_mouse_init()) {
         goto err;

@@ -16,8 +16,6 @@
 
 namespace fallout {
 
-static SDL_Gamepad* gController = nullptr;
-
 // Gamepad settings read from config on init.
 // Deadzone: whole-number percentage (0-100), converted to [0.0..1.0] at use.
 // Sensitivity: user-facing 1-100 scale where 50 is the default and higher means faster.
@@ -655,6 +653,10 @@ void GamepadRegisterDefaultMapping()
     // just the identity. Registering it under the "default" GUID makes SDL apply
     // it to any pad it doesn't otherwise recognise, matching what the nxdk SDL2
     // library hardcoded internally.
+    //
+    // It is supplied through the hint rather than SDL_AddGamepadMapping() so
+    // that it can be set before SDL_INIT_JOYSTICK, which loads the hint ahead of
+    // detecting any devices. See dxinput_init().
     static const char kDefaultMapping[] =
         "default,Original Xbox Controller,"
         "a:b0,b:b1,x:b2,y:b3,"
@@ -665,7 +667,7 @@ void GamepadRegisterDefaultMapping()
         "leftx:a0,lefty:a1,rightx:a2,righty:a3,"
         "lefttrigger:a4,righttrigger:a5,";
 
-    if (SDL_AddGamepadMapping(kDefaultMapping) < 0) {
+    if (!SDL_SetHint(SDL_HINT_GAMECONTROLLERCONFIG, kDefaultMapping)) {
         debug_printf("Failed to register default gamepad mapping: %s\n", SDL_GetError());
         SDL_ClearError();
     }
@@ -696,6 +698,16 @@ void HandleJoystickDeviceRemoved(const SDL_Event& event)
 void HandleControllerDeviceAdded(const SDL_Event& event)
 {
     const SDL_JoystickID instanceId = event.gdevice.which;
+
+    // Input is handled per event, so every attached pad is opened and drives the
+    // game. A pad attached at startup is announced twice (once when the joystick
+    // is detected and again when the gamepad subsystem comes up); opening it a
+    // second time would bump its refcount and the single close on removal would
+    // leak it.
+    if (SDL_GetGamepadFromID(instanceId) != nullptr) {
+        return;
+    }
+
     debug_printf("Opening game controller for joystick %u\n", (unsigned int)instanceId);
 
     if (!SDL_IsGamepad(instanceId)) {
@@ -703,14 +715,14 @@ void HandleControllerDeviceAdded(const SDL_Event& event)
         return;
     }
 
-    gController = SDL_OpenGamepad(instanceId);
-    if (gController == nullptr) {
+    SDL_Gamepad* controller = SDL_OpenGamepad(instanceId);
+    if (controller == nullptr) {
         debug_printf("Failed to open game controller: %s\n", SDL_GetError());
         SDL_ClearError();
         return;
     }
 
-    char* mapping = SDL_GetGamepadMapping(gController);
+    char* mapping = SDL_GetGamepadMapping(controller);
     if (mapping != nullptr) {
         debug_printf("Opened game controller with mapping:\n%s\n", mapping);
         SDL_free(mapping);
@@ -719,13 +731,10 @@ void HandleControllerDeviceAdded(const SDL_Event& event)
 
 void HandleControllerDeviceRemoved(const SDL_Event& event)
 {
-    if (gController != nullptr) {
-        SDL_Gamepad* controller = SDL_GetGamepadFromID(event.gdevice.which);
-        if (controller == gController) {
-            debug_printf("Removed game controller for joystick %u\n", (unsigned int)event.gdevice.which);
-            SDL_CloseGamepad(gController);
-            gController = nullptr;
-        }
+    SDL_Gamepad* controller = SDL_GetGamepadFromID(event.gdevice.which);
+    if (controller != nullptr) {
+        debug_printf("Removed game controller for joystick %u\n", (unsigned int)event.gdevice.which);
+        SDL_CloseGamepad(controller);
     }
 }
 

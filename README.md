@@ -59,23 +59,37 @@ An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much 
 
 # Build Instructions
 - Install and set up NXDK https://github.com/XboxDev/nxdk
-- I personally use WSL Ubuntu 22.04.5 on Windows 11 for NXDK stuff
+- I personally use WSL Ubuntu 24.04 on Windows 11 for NXDK stuff
+- Install the extra tools the audio library needs:
+- - **clang 20.1.3 or newer** (I use clang 21). nxdk-audio uses the C23 `#embed` directive, which clang 18 and older can't compile. Avoid clang 19.x through 20.1.2, which have an optimizer bug that the NXDK activation script warns about
+- - - NXDK calls whichever `clang`/`lld` is first on your PATH, so if your default `clang` is older, put the newer one first, e.g. `export PATH=/usr/lib/llvm-21/bin:$PATH`
+- - **Rust/cargo**, used to build nxdk-audio's DSP assembler. Install it with rustup (https://rustup.rs) and run `. ~/.cargo/env` in the terminal you build from
 - Clone this repo
 - The build needs the hardware accelerated SDL3 port for NXDK: https://github.com/Ryzee119/nxdk-sdl3
 - - Clone it (with `--recurse-submodules`, it vendors SDL itself) anywhere you like
+- - Audio needs nxdk-sdl3's `nxaudio` branch, which plays sound through the Xbox's audio chip (APU) using nxdk-audio (https://github.com/Ryzee119/nxdk-audio). That branch hasn't been merged into `master` yet, so merge it into the latest `master`:
+- - - `git checkout -b master-nxaudio-fallout master`
+- - - `git merge origin/nxaudio`
+- - - `git submodule update --init --recursive`
+- - The `nxaudio` branch on its own still has a timing bug in `nxdk_glue/audio/SDL_xboxaudio.c` that makes the music skip and play too fast. The fix makes the driver wait 4x the buffer length instead of a fixed 50 ms, start its semaphore at 0, and stop zeroing buffers on timeout
 - - If it sits next to this repo, or one directory above it, CMake finds it automatically
 - - Otherwise pass `-DNXDK_SDL3_DIR=/path/to/nxdk-sdl3` (or export `NXDK_SDL3_DIR`)
-- - If no local checkout is found CMake fetches it from GitHub
+- - If no local checkout is found, CMake fetches upstream `master` from GitHub. That uses the old audio driver, so use a local checkout set up as above
+- - nxdk-audio itself is downloaded automatically when CMake configures the build
 - Copy the following files from your Fallout 1 install to the fallout-ce folder in this repo
 - - `DATA` folder
 - - `CRITTER.DAT`
 - - `MASTER.DAT`
-- Open a terminal and run the NXDK activation script (`./nxdk/bin/activate`)
+- Open a terminal and set up the environment:
+- - `export PATH=/usr/lib/llvm-21/bin:$PATH` (only if your default `clang` is older than 20.1.3)
+- - `. ~/.cargo/env`
+- - Run the NXDK activation script (`./nxdk/bin/activate`)
 - Run the following commands:
 - - `mkdir build`
 - - `cd build`
 - - `nxdk-cmake -DCMAKE_BUILD_TYPE=Release ..`
 - - `make` or `make -jX` where X is the number of CPU threads you want to use
+- - If you change compilers, delete the `build` folder first, because CMake caches the compiler it found
 - You should end up with `fallout-ce.iso` in the root folder and `default.xbe` in your `fallout-ce` folder
 - Either burn `fallout-ce.iso` to a DVD or copy the `fallout-ce` folder to your Xbox HDD
 
