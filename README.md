@@ -7,7 +7,7 @@ An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much 
 - Working save system in UDATA that appears in MS Dashboard
 - Functioning mouse emulation on the controller with hot keys mapped to buttons
 - Right-stick camera control
-- 480p, 720p and 1080i support via ini file in UDATA (only 480p runs well)
+- 480p and 720p support via ini file in UDATA
 - Default "Vault Dweller" name on create character screen due to lack of keyboard
 - Fully "playable" in that you can probably beat the game without it crashing
 
@@ -15,7 +15,7 @@ An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much 
 - Custom Xbox control scheme potentially with direct character movement similar to Planescape PS4/DevilutionX
 - Fix graphical problems with talking head and conversation overlay screens
 - Fix audio crackling
-- Improve performance and optimize code (NXDK SDL2 is software rendered)
+- Improve performance and optimize code
 - Custom Xbox UI graphics showing the hotkey buttons
 - Reconfigure save slots directory logic so that the individual slots appear separately in the MS Dashboard
 - USB Mouse and Keyboard support
@@ -59,9 +59,13 @@ An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much 
 
 # Build Instructions
 - Install and set up NXDK https://github.com/XboxDev/nxdk
-- Also make sure you have `pkgconf` installed (`sudo apt install pkgconf` on Ubuntu)
 - I personally use WSL Ubuntu 22.04.5 on Windows 11 for NXDK stuff
 - Clone this repo
+- The build needs the hardware accelerated SDL3 port for NXDK: https://github.com/Ryzee119/nxdk-sdl3
+- - Clone it (with `--recurse-submodules`, it vendors SDL itself) anywhere you like
+- - If it sits next to this repo, or one directory above it, CMake finds it automatically
+- - Otherwise pass `-DNXDK_SDL3_DIR=/path/to/nxdk-sdl3` (or export `NXDK_SDL3_DIR`)
+- - If no local checkout is found CMake fetches it from GitHub
 - Copy the following files from your Fallout 1 install to the fallout-ce folder in this repo
 - - `DATA` folder
 - - `CRITTER.DAT`
@@ -133,10 +137,10 @@ $ mv app Fallout
 
 - Download and copy `fallout-ce` to this folder.
 
-- Install [SDL2](https://libsdl.org/download-2.0.php):
+- Install [SDL3](https://libsdl.org/):
 
 ```console
-$ sudo apt install libsdl2-2.0-0
+$ sudo apt install libsdl3-0
 ```
 
 - Run `./fallout-ce`.

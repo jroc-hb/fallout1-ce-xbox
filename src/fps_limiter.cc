@@ -1,6 +1,6 @@
 #include "fps_limiter.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 namespace fallout {
 
@@ -17,8 +17,9 @@ void FpsLimiter::mark()
 
 void FpsLimiter::throttle() const
 {
-    if (1000 / _fps > SDL_GetTicks() - _ticks) {
-        SDL_Delay(1000 / _fps - (SDL_GetTicks() - _ticks));
+    Uint64 elapsed = SDL_GetTicks() - _ticks;
+    if (1000 / _fps > elapsed) {
+        SDL_Delay(static_cast<Uint32>(1000 / _fps - elapsed));
     }
 }
 

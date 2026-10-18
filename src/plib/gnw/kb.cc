@@ -87,7 +87,7 @@ static key_ansi_t ascii_table[256];
 // 1 - key pressed.
 //
 // 0x672FA0
-unsigned char keys[SDL_NUM_SCANCODES];
+unsigned char keys[SDL_SCANCODE_COUNT];
 
 // 0x6730A0
 static unsigned int kb_idle_start_time;
@@ -2077,19 +2077,17 @@ static void kb_map_ascii_Spanish()
 // 0x4BCCD0
 static void kb_init_lock_status()
 {
-    if ((SDL_GetModState() & KMOD_CAPS) != 0) {
+    if ((SDL_GetModState() & SDL_KMOD_CAPS) != 0) {
         kb_lock_flags |= MODIFIER_KEY_STATE_CAPS_LOCK;
     }
 
-    if ((SDL_GetModState() & KMOD_NUM) != 0) {
+    if ((SDL_GetModState() & SDL_KMOD_NUM) != 0) {
         kb_lock_flags |= MODIFIER_KEY_STATE_NUM_LOCK;
     }
 
-#if SDL_VERSION_ATLEAST(2, 0, 18)
-    if ((SDL_GetModState() & KMOD_SCROLL) != 0) {
+    if ((SDL_GetModState() & SDL_KMOD_SCROLL) != 0) {
         kb_lock_flags |= MODIFIER_KEY_STATE_SCROLL_LOCK;
     }
-#endif
 }
 
 // 0x4BCD18

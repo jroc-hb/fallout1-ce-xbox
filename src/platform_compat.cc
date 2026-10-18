@@ -36,7 +36,7 @@
 #include "plib/gnw/debug.h"
 #endif
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 namespace fallout {
 

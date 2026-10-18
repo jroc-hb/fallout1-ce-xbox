@@ -1,7 +1,7 @@
 #ifndef FALLOUT_PLIB_GNW_TOUCH_H
 #define FALLOUT_PLIB_GNW_TOUCH_H
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 namespace fallout {
 

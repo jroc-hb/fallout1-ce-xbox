@@ -1470,12 +1470,12 @@ static void _MVE_sndResume()
 static int _nfConfig(int a1, int a2, int a3, int a4)
 {
     if (gMovieSdlSurface1 != NULL) {
-        SDL_FreeSurface(gMovieSdlSurface1);
+        SDL_DestroySurface(gMovieSdlSurface1);
         gMovieSdlSurface1 = NULL;
     }
 
     if (gMovieSdlSurface2 != NULL) {
-        SDL_FreeSurface(gMovieSdlSurface2);
+        SDL_DestroySurface(gMovieSdlSurface2);
         gMovieSdlSurface2 = NULL;
     }
 
@@ -1489,28 +1489,16 @@ static int _nfConfig(int a1, int a2, int a3, int a4)
         _mveBH >>= 1;
     }
 
-    int depth;
-    int rmask;
-    int gmask;
-    int bmask;
-    if (a4) {
-        depth = 16;
-        rmask = 0x7C00;
-        gmask = 0x3E0;
-        bmask = 0x1F;
-    } else {
-        depth = 8;
-        rmask = 0;
-        gmask = 0;
-        bmask = 0;
-    }
+    // 16 bit frames are XRGB1555 (rmask 0x7C00, gmask 0x3E0, bmask 0x1F),
+    // 8 bit frames are palettized.
+    SDL_PixelFormat format = a4 ? SDL_PIXELFORMAT_XRGB1555 : SDL_PIXELFORMAT_INDEX8;
 
-    gMovieSdlSurface1 = SDL_CreateRGBSurface(0, _mveBW, _mveBH, depth, rmask, gmask, bmask, 0);
+    gMovieSdlSurface1 = SDL_CreateSurface(_mveBW, _mveBH, format);
     if (gMovieSdlSurface1 == NULL) {
         return 0;
     }
 
-    gMovieSdlSurface2 = SDL_CreateRGBSurface(0, _mveBW, _mveBH, depth, rmask, gmask, bmask, 0);
+    gMovieSdlSurface2 = SDL_CreateSurface(_mveBW, _mveBH, format);
     if (gMovieSdlSurface2 == NULL) {
         return 0;
     }
@@ -1535,13 +1523,13 @@ static int _nfConfig(int a1, int a2, int a3, int a4)
 static bool movieLockSurfaces()
 {
     if (gMovieSdlSurface1 != NULL && gMovieSdlSurface2 != NULL) {
-        if (SDL_LockSurface(gMovieSdlSurface1) != 0) {
+        if (!SDL_LockSurface(gMovieSdlSurface1)) {
             return false;
         }
 
         gMovieDirectDrawSurfaceBuffer1 = (unsigned char*)gMovieSdlSurface1->pixels;
 
-        if (SDL_LockSurface(gMovieSdlSurface2) != 0) {
+        if (!SDL_LockSurface(gMovieSdlSurface2)) {
             return false;
         }
 
@@ -1710,12 +1698,12 @@ static void _MVE_sndRelease()
 static void _nfRelease()
 {
     if (gMovieSdlSurface1 != NULL) {
-        SDL_FreeSurface(gMovieSdlSurface1);
+        SDL_DestroySurface(gMovieSdlSurface1);
         gMovieSdlSurface1 = NULL;
     }
 
     if (gMovieSdlSurface2 != NULL) {
-        SDL_FreeSurface(gMovieSdlSurface2);
+        SDL_DestroySurface(gMovieSdlSurface2);
         gMovieSdlSurface2 = NULL;
     }
 }

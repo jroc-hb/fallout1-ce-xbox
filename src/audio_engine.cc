@@ -1,10 +1,11 @@
 #include "audio_engine.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include <mutex>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 namespace fallout {
 
@@ -27,16 +28,36 @@ struct AudioEngineSoundBuffer {
 
 extern bool GNW95_isActive;
 
+// SDL3 dropped SDL_MIX_MAXVOLUME; the game still expresses sound buffer volume
+// on the 0..128 scale it used, so keep the constant locally and scale to the
+// [0.0..1.0] SDL_MixAudio now expects.
+#define AUDIO_ENGINE_MAX_VOLUME 128
+
+// The audio callback runs on an SDL worker thread. The nxdk backend gives those
+// threads a single page of stack, so both mixing buffers live on the heap
+// instead of on that thread's stack.
+#define AUDIO_ENGINE_MIX_BUFFER_SIZE 8192
+#define AUDIO_ENGINE_CONVERT_BUFFER_SIZE 1024
+
+// How much source data is handed to a sound's converter at a time. sound.cc
+// reads soundBuffer->pos back to decide when to refill streaming sections and
+// when a track has finished, so the cursor must not run far ahead of what is
+// audible - but one put still has to cover many output bytes to stay cheap.
+#define AUDIO_ENGINE_FEED_CHUNK_SIZE 512
+
 static bool soundBufferIsValid(int soundBufferIndex);
-static void audioEngineMixin(void* userData, Uint8* stream, int length);
+static void SDLCALL audioEngineMixin(void* userData, SDL_AudioStream* stream, int additionalAmount, int totalAmount);
 
 static SDL_AudioSpec gAudioEngineSpec;
-static SDL_AudioDeviceID gAudioEngineDeviceId = -1;
+static SDL_AudioStream* gAudioEngineStream = NULL;
+static int gAudioEngineSilence = 0;
+static Uint8* gAudioEngineMixBuffer = NULL;
+static Uint8* gAudioEngineConvertBuffer = NULL;
 static AudioEngineSoundBuffer gAudioEngineSoundBuffers[AUDIO_ENGINE_SOUND_BUFFERS];
 
 static bool audioEngineIsInitialized()
 {
-    return gAudioEngineDeviceId != -1;
+    return gAudioEngineStream != NULL;
 }
 
 static bool soundBufferIsValid(int soundBufferIndex)
@@ -44,9 +65,11 @@ static bool soundBufferIsValid(int soundBufferIndex)
     return soundBufferIndex >= 0 && soundBufferIndex < AUDIO_ENGINE_SOUND_BUFFERS;
 }
 
-static void audioEngineMixin(void* userData, Uint8* stream, int length)
+// Mixes all active sound buffers into `output`, which is `length` bytes of the
+// device format. Mirrors the SDL2 audio callback this used to be.
+static void audioEngineMixinChunk(Uint8* output, int length)
 {
-    memset(stream, gAudioEngineSpec.silence, length);
+    memset(output, gAudioEngineSilence, length);
 
     if (!GNW95_isActive) {
         return;
@@ -59,33 +82,59 @@ static void audioEngineMixin(void* userData, Uint8* stream, int length)
         if (soundBuffer->active && soundBuffer->playing) {
             int srcFrameSize = soundBuffer->bitsPerSample / 8 * soundBuffer->channels;
 
-            unsigned char buffer[1024];
+            unsigned char* buffer = gAudioEngineConvertBuffer;
             int pos = 0;
+
+            // Set once the source data has run out, either because a one-shot
+            // sound reached its end or defensively on a degenerate frame size.
+            // The converter is still drained afterwards so the tail is heard.
+            bool exhausted = false;
+
             while (pos < length) {
-                int remaining = length - pos;
-                if (remaining > sizeof(buffer)) {
-                    remaining = sizeof(buffer);
+                int wanted = length - pos;
+                if (wanted > AUDIO_ENGINE_CONVERT_BUFFER_SIZE) {
+                    wanted = AUDIO_ENGINE_CONVERT_BUFFER_SIZE;
                 }
 
-                // TODO: Make something better than frame-by-frame convertion.
-                SDL_AudioStreamPut(soundBuffer->stream, (unsigned char*)soundBuffer->data + soundBuffer->pos, srcFrameSize);
-                soundBuffer->pos += srcFrameSize;
+                // Top the converter up in contiguous runs. Feeding it a single
+                // frame per iteration - as this did originally - costs a locked
+                // put/get pair for every few output bytes, which is far too
+                // expensive to sustain once SDL is also resampling.
+                while (!exhausted && SDL_GetAudioStreamAvailable(soundBuffer->stream) < wanted) {
+                    unsigned int run = soundBuffer->size - soundBuffer->pos;
+                    if (run > AUDIO_ENGINE_FEED_CHUNK_SIZE) {
+                        run = AUDIO_ENGINE_FEED_CHUNK_SIZE;
+                    }
+                    run -= run % srcFrameSize;
 
-                int bytesRead = SDL_AudioStreamGet(soundBuffer->stream, buffer, remaining);
-                if (bytesRead == -1) {
+                    if (run == 0) {
+                        exhausted = true;
+                        break;
+                    }
+
+                    SDL_PutAudioStreamData(soundBuffer->stream,
+                        (unsigned char*)soundBuffer->data + soundBuffer->pos, run);
+                    soundBuffer->pos += run;
+
+                    if (soundBuffer->pos >= soundBuffer->size) {
+                        if (soundBuffer->looping) {
+                            soundBuffer->pos %= soundBuffer->size;
+                        } else {
+                            soundBuffer->playing = false;
+                            exhausted = true;
+                        }
+                    }
+                }
+
+                // Availability was just ensured above, so nothing left to read
+                // here really does mean this sound is finished for now.
+                int bytesRead = SDL_GetAudioStreamData(soundBuffer->stream, buffer, wanted);
+                if (bytesRead <= 0) {
                     break;
                 }
 
-                SDL_MixAudioFormat(stream + pos, buffer, gAudioEngineSpec.format, bytesRead, soundBuffer->volume);
-
-                if (soundBuffer->pos >= soundBuffer->size) {
-                    if (soundBuffer->looping) {
-                        soundBuffer->pos %= soundBuffer->size;
-                    } else {
-                        soundBuffer->playing = false;
-                        break;
-                    }
-                }
+                SDL_MixAudio(output + pos, buffer, gAudioEngineSpec.format, bytesRead,
+                    (float)soundBuffer->volume / AUDIO_ENGINE_MAX_VOLUME);
 
                 pos += bytesRead;
             }
@@ -93,29 +142,77 @@ static void audioEngineMixin(void* userData, Uint8* stream, int length)
     }
 }
 
+static void SDLCALL audioEngineMixin(void* userData, SDL_AudioStream* stream, int additionalAmount, int totalAmount)
+{
+    (void)userData;
+    (void)totalAmount;
+
+    while (additionalAmount > 0) {
+        int length = additionalAmount;
+        if (length > AUDIO_ENGINE_MIX_BUFFER_SIZE) {
+            length = AUDIO_ENGINE_MIX_BUFFER_SIZE;
+        }
+
+        audioEngineMixinChunk(gAudioEngineMixBuffer, length);
+        SDL_PutAudioStreamData(stream, gAudioEngineMixBuffer, length);
+
+        additionalAmount -= length;
+    }
+}
+
 bool audioEngineInit()
 {
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) == -1) {
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         return false;
     }
 
-    SDL_AudioSpec desiredSpec;
-    desiredSpec.freq = 22050;
-    desiredSpec.format = AUDIO_S16;
-    desiredSpec.channels = 2;
-#ifdef NXDK
-    desiredSpec.samples = 4096; // NXDK TODO Fixes audio crackling but may be causing FMV stuttering?
-#else
-    desiredSpec.samples = 1024;
-#endif
-    desiredSpec.callback = audioEngineMixin;
+    // SDL2's nxdk driver hardcoded a 1024 frame device buffer and ignored what
+    // the app asked for, so this 4096 only started taking effect under SDL3.
+    // Matching SDL2 exactly by asking for 1024 was tried and is audibly worse -
+    // the music starves - so the extra headroom is doing real work here even
+    // though it costs latency. Leave it at 4096 unless there is evidence to
+    // move it.
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "4096");
 
-    gAudioEngineDeviceId = SDL_OpenAudioDevice(NULL, 0, &desiredSpec, &gAudioEngineSpec, SDL_AUDIO_ALLOW_ANY_CHANGE);
-    if (gAudioEngineDeviceId == -1) {
+    gAudioEngineSpec.freq = 22050;
+    gAudioEngineSpec.format = SDL_AUDIO_S16;
+    gAudioEngineSpec.channels = 2;
+
+    gAudioEngineMixBuffer = (Uint8*)malloc(AUDIO_ENGINE_MIX_BUFFER_SIZE);
+    gAudioEngineConvertBuffer = (Uint8*)malloc(AUDIO_ENGINE_CONVERT_BUFFER_SIZE);
+    if (gAudioEngineMixBuffer == NULL || gAudioEngineConvertBuffer == NULL) {
+        free(gAudioEngineMixBuffer);
+        gAudioEngineMixBuffer = NULL;
+        free(gAudioEngineConvertBuffer);
+        gAudioEngineConvertBuffer = NULL;
         return false;
     }
 
-    SDL_PauseAudioDevice(gAudioEngineDeviceId, 0);
+    gAudioEngineStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+        &gAudioEngineSpec, audioEngineMixin, NULL);
+    if (gAudioEngineStream == NULL) {
+        free(gAudioEngineMixBuffer);
+        gAudioEngineMixBuffer = NULL;
+        free(gAudioEngineConvertBuffer);
+        gAudioEngineConvertBuffer = NULL;
+        return false;
+    }
+
+    // SDL2 opened the device with SDL_AUDIO_ALLOW_ANY_CHANGE, so the mixer ran
+    // in the hardware's own format and nothing had to be resampled on the audio
+    // thread. SDL3 instead honours the spec we asked for and quietly converts,
+    // which on Xbox means resampling every callback from 22050Hz to the AC97's
+    // 48000Hz. Adopt the device format instead so that conversion disappears -
+    // each sound's own stream then converts straight to the hardware rate.
+    SDL_AudioSpec deviceSpec;
+    if (SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(gAudioEngineStream), &deviceSpec, NULL)
+        && SDL_SetAudioStreamFormat(gAudioEngineStream, &deviceSpec, NULL)) {
+        gAudioEngineSpec = deviceSpec;
+    }
+
+    gAudioEngineSilence = SDL_GetSilenceValueForFormat(gAudioEngineSpec.format);
+
+    SDL_ResumeAudioStreamDevice(gAudioEngineStream);
 
     return true;
 }
@@ -123,8 +220,14 @@ bool audioEngineInit()
 void audioEngineExit()
 {
     if (audioEngineIsInitialized()) {
-        SDL_CloseAudioDevice(gAudioEngineDeviceId);
-        gAudioEngineDeviceId = -1;
+        // Also closes the device that was opened alongside the stream.
+        SDL_DestroyAudioStream(gAudioEngineStream);
+        gAudioEngineStream = NULL;
+
+        free(gAudioEngineMixBuffer);
+        gAudioEngineMixBuffer = NULL;
+        free(gAudioEngineConvertBuffer);
+        gAudioEngineConvertBuffer = NULL;
     }
 
     if (SDL_WasInit(SDL_INIT_AUDIO)) {
@@ -135,14 +238,14 @@ void audioEngineExit()
 void audioEnginePause()
 {
     if (audioEngineIsInitialized()) {
-        SDL_PauseAudioDevice(gAudioEngineDeviceId, 1);
+        SDL_PauseAudioStreamDevice(gAudioEngineStream);
     }
 }
 
 void audioEngineResume()
 {
     if (audioEngineIsInitialized()) {
-        SDL_PauseAudioDevice(gAudioEngineDeviceId, 0);
+        SDL_ResumeAudioStreamDevice(gAudioEngineStream);
     }
 }
 
@@ -162,12 +265,16 @@ int audioEngineCreateSoundBuffer(unsigned int size, int bitsPerSample, int chann
             soundBuffer->bitsPerSample = bitsPerSample;
             soundBuffer->channels = channels;
             soundBuffer->rate = rate;
-            soundBuffer->volume = SDL_MIX_MAXVOLUME;
+            soundBuffer->volume = AUDIO_ENGINE_MAX_VOLUME;
             soundBuffer->playing = false;
             soundBuffer->looping = false;
             soundBuffer->pos = 0;
             soundBuffer->data = malloc(size);
-            soundBuffer->stream = SDL_NewAudioStream(bitsPerSample == 16 ? AUDIO_S16 : AUDIO_S8, channels, rate, gAudioEngineSpec.format, gAudioEngineSpec.channels, gAudioEngineSpec.freq);
+            SDL_AudioSpec srcSpec;
+            srcSpec.format = bitsPerSample == 16 ? SDL_AUDIO_S16 : SDL_AUDIO_S8;
+            srcSpec.channels = channels;
+            srcSpec.freq = rate;
+            soundBuffer->stream = SDL_CreateAudioStream(&srcSpec, &gAudioEngineSpec);
             return index;
         }
     }
@@ -197,7 +304,7 @@ bool audioEngineSoundBufferRelease(int soundBufferIndex)
     free(soundBuffer->data);
     soundBuffer->data = NULL;
 
-    SDL_FreeAudioStream(soundBuffer->stream);
+    SDL_DestroyAudioStream(soundBuffer->stream);
     soundBuffer->stream = NULL;
 
     return true;
@@ -315,6 +422,9 @@ bool audioEngineSoundBufferStop(int soundBufferIndex)
 
     soundBuffer->playing = false;
 
+    // Don't let buffered audio from before the stop leak into a later replay.
+    SDL_ClearAudioStream(soundBuffer->stream);
+
     return true;
 }
 
@@ -371,6 +481,10 @@ bool audioEngineSoundBufferSetCurrentPosition(int soundBufferIndex, unsigned int
     }
 
     soundBuffer->pos = pos % soundBuffer->size;
+
+    // Whatever the converter still holds was produced from the old position -
+    // playing it out after a seek is heard as audio arriving out of order.
+    SDL_ClearAudioStream(soundBuffer->stream);
 
     return true;
 }

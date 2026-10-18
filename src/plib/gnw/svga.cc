@@ -45,7 +45,7 @@ static void rebuildPalette32()
     if (!palette_32bit) {
         palette_32bit = new Uint32[256];
     }
-    SDL_Color* colors = gSdlSurface->format->palette->colors;
+    SDL_Color* colors = SDL_GetSurfacePalette(gSdlSurface)->colors;
     for (int i = 0; i < 256; i++) {
         palette_32bit[i] = (colors[i].a << 24) | (colors[i].r << 16) | (colors[i].g << 8) | colors[i].b;
     }
@@ -123,7 +123,8 @@ static void GNW95_ShowRect_Xbox(unsigned char* src, unsigned int srcPitch,
 // 0x4CB310
 void GNW95_SetPaletteEntries(unsigned char* palette, int start, int count)
 {
-    if (gSdlSurface != NULL && gSdlSurface->format->palette != NULL) {
+    SDL_Palette* surfacePalette = gSdlSurface != NULL ? SDL_GetSurfacePalette(gSdlSurface) : NULL;
+    if (surfacePalette != NULL) {
         SDL_Color colors[256];
 
         if (count != 0) {
@@ -135,7 +136,7 @@ void GNW95_SetPaletteEntries(unsigned char* palette, int start, int count)
             }
         }
 
-        SDL_SetPaletteColors(gSdlSurface->format->palette, colors, start, count);
+        SDL_SetPaletteColors(surfacePalette, colors, start, count);
 #ifdef NXDK
         if (palette_32bit) {
             rebuildPalette32();
@@ -148,7 +149,8 @@ void GNW95_SetPaletteEntries(unsigned char* palette, int start, int count)
 // 0x4CB568
 void GNW95_SetPalette(unsigned char* palette)
 {
-    if (gSdlSurface != NULL && gSdlSurface->format->palette != NULL) {
+    SDL_Palette* surfacePalette = gSdlSurface != NULL ? SDL_GetSurfacePalette(gSdlSurface) : NULL;
+    if (surfacePalette != NULL) {
         SDL_Color colors[256];
 
         for (int index = 0; index < 256; index++) {
@@ -158,7 +160,7 @@ void GNW95_SetPalette(unsigned char* palette)
             colors[index].a = 255;
         }
 
-        SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
+        SDL_SetPaletteColors(surfacePalette, colors, 0, 256);
 #ifdef NXDK
         if (palette_32bit) {
             rebuildPalette32();
@@ -197,42 +199,49 @@ bool svga_init(VideoOptions* video_options)
 {
 #ifdef NXDK
     Sleep(1000);
-    // Based on LithiumX solution to detect Xbox resolution: 
-    // https://github.com/Ryzee119/LithiumX/blob/f4471d287d44abc84803d3b901bd4aa7ed459689/src/platform/xbox/platform.c#L99
-    // First try the user-specified resolution in f1_res.ini, then fall back to 480p
-    // NOTE: 1080i is currently broken in the experimental SDL2 hardware renderer lib
-    if (XVideoSetMode(video_options->width, video_options->height, 32, REFRESH_DEFAULT) == false) {
-        if (XVideoSetMode(640, 480, 32, REFRESH_DEFAULT)) {
-            video_options->width = 640;
-            video_options->height = 480;
-        }
-    }
 #else
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
 #endif
 
     debugPrint("Initializing the video");
 
-    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
+    if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
         return false;
     }
 
 #ifdef NXDK
-    Uint32 windowFlags = SDL_WINDOW_FULLSCREEN;
+    SDL_WindowFlags windowFlags = SDL_WINDOW_FULLSCREEN;
 #else
-    Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI;
+    SDL_WindowFlags windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     if (video_options->fullscreen) {
         windowFlags |= SDL_WINDOW_FULLSCREEN;
     }
 #endif
 
-    gSdlWindow = SDL_CreateWindow(GNW95_title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+    gSdlWindow = SDL_CreateWindow(GNW95_title,
         video_options->width * video_options->scale,
         video_options->height * video_options->scale,
         windowFlags);
     if (gSdlWindow == NULL) {
         return false;
     }
+
+#ifdef NXDK
+    // The nxdk video driver picks the closest mode it can actually set (480p or
+    // 720p) and resizes the window accordingly, so take the resolution it gave
+    // us rather than the one requested in f1_res.ini.
+    int actualWidth;
+    int actualHeight;
+    SDL_GetWindowSize(gSdlWindow, &actualWidth, &actualHeight);
+    if (actualWidth > 0 && actualHeight > 0) {
+        if (actualWidth != video_options->width || actualHeight != video_options->height) {
+            debugPrint("Requested %dx%d, using %dx%d\n",
+                video_options->width, video_options->height, actualWidth, actualHeight);
+        }
+        video_options->width = actualWidth;
+        video_options->height = actualHeight;
+    }
+#endif
 
     if (!createRenderer(video_options->width, video_options->height)) {
         destroyRenderer();
@@ -241,8 +250,19 @@ bool svga_init(VideoOptions* video_options)
         return false;
     }
 
-    gSdlSurface = SDL_CreateRGBSurface(0, video_options->width, video_options->height, 8, 0, 0, 0, 0);
+    gSdlSurface = SDL_CreateSurface(video_options->width, video_options->height, SDL_PIXELFORMAT_INDEX8);
     if (gSdlSurface == NULL) {
+        destroyRenderer();
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = NULL;
+        return false;
+    }
+
+    // SDL3 no longer attaches a palette to indexed surfaces automatically.
+    SDL_Palette* surfacePalette = SDL_CreateSurfacePalette(gSdlSurface);
+    if (surfacePalette == NULL) {
+        SDL_DestroySurface(gSdlSurface);
+        gSdlSurface = NULL;
         destroyRenderer();
         SDL_DestroyWindow(gSdlWindow);
         gSdlWindow = NULL;
@@ -257,7 +277,7 @@ bool svga_init(VideoOptions* video_options)
         colors[index].a = 255;
     }
 
-    SDL_SetPaletteColors(gSdlSurface->format->palette, colors, 0, 256);
+    SDL_SetPaletteColors(surfacePalette, colors, 0, 256);
 
     scr_size.ulx = 0;
     scr_size.uly = 0;
@@ -308,36 +328,29 @@ int screenGetHeight()
 
 static bool createRenderer(int width, int height)
 {
-#ifdef NXDK
-    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    if (!gSdlRenderer) {
-        gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, SDL_RENDERER_SOFTWARE);
-    }
-#else
-    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, -1, 0);
-#endif
-
+    gSdlRenderer = SDL_CreateRenderer(gSdlWindow, NULL);
     if (gSdlRenderer == NULL) {
         return false;
     }
 
-    if (SDL_RenderSetLogicalSize(gSdlRenderer, width, height) != 0) {
+    // NXDK: pbkit always flips on vblank, so there is no vsync to request -
+    // the SDL2 SDL_RENDERER_PRESENTVSYNC flag has no SDL3 equivalent here.
+
+    if (!SDL_SetRenderLogicalPresentation(gSdlRenderer, width, height, SDL_LOGICAL_PRESENTATION_LETTERBOX)) {
         return false;
     }
-
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 
 #ifdef NXDK
     gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_ARGB8888,
                                     SDL_TEXTUREACCESS_STREAMING, width, height);
     if (gSdlTexture) {
-        texture_locked = (SDL_LockTexture(gSdlTexture, NULL, &texture_pixels, &texture_pitch) == 0);
+        texture_locked = SDL_LockTexture(gSdlTexture, NULL, &texture_pixels, &texture_pitch);
         if (texture_locked) {
             debugPrint("Direct texture access enabled (pitch: %d)\n", texture_pitch);
         }
     }
 #else
-    gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_RGB888,
+    gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_XRGB8888,
                                     SDL_TEXTUREACCESS_STREAMING, width, height);
 #endif
 
@@ -345,13 +358,11 @@ static bool createRenderer(int width, int height)
         return false;
     }
 
-    Uint32 format;
-    if (SDL_QueryTexture(gSdlTexture, &format, NULL, NULL, NULL) != 0) {
-        return false;
-    }
+    // Replaces the SDL2 SDL_HINT_RENDER_SCALE_QUALITY="0" hint.
+    SDL_SetTextureScaleMode(gSdlTexture, SDL_SCALEMODE_NEAREST);
 
 #ifndef NXDK
-    gSdlTextureSurface = SDL_CreateRGBSurfaceWithFormat(0, width, height, SDL_BITSPERPIXEL(format), format);
+    gSdlTextureSurface = SDL_CreateSurface(width, height, gSdlTexture->format);
     if (gSdlTextureSurface == NULL) {
         return false;
     }
@@ -371,7 +382,7 @@ static void destroyRenderer()
 #endif
 
     if (gSdlTextureSurface != NULL) {
-        SDL_FreeSurface(gSdlTextureSurface);
+        SDL_DestroySurface(gSdlTextureSurface);
         gSdlTextureSurface = NULL;
     }
 
@@ -407,14 +418,14 @@ void renderPresent()
         }
         SDL_UnlockTexture(gSdlTexture);
         texture_locked = false;
-        texture_locked = (SDL_LockTexture(gSdlTexture, NULL, &texture_pixels, &texture_pitch) == 0);
+        texture_locked = SDL_LockTexture(gSdlTexture, NULL, &texture_pixels, &texture_pitch);
     }
 #else
     SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
 #endif
 
     SDL_RenderClear(gSdlRenderer);
-    SDL_RenderCopy(gSdlRenderer, gSdlTexture, NULL, NULL);
+    SDL_RenderTexture(gSdlRenderer, gSdlTexture, NULL, NULL);
     SDL_RenderPresent(gSdlRenderer);
 }
 
@@ -431,7 +442,7 @@ void movieFrameStart()
 void movieFrameEnd()
 {
     if (!texture_locked && gSdlTexture) {
-        texture_locked = (SDL_LockTexture(gSdlTexture, NULL, &texture_pixels, &texture_pitch) == 0);
+        texture_locked = SDL_LockTexture(gSdlTexture, NULL, &texture_pixels, &texture_pitch);
     }
 }
 

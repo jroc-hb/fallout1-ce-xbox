@@ -1,7 +1,7 @@
 #ifndef FALLOUT_PLIB_GNW_INPUT_H_
 #define FALLOUT_PLIB_GNW_INPUT_H_
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include "plib/gnw/kb.h"
 #include "plib/gnw/mouse.h"

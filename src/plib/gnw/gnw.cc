@@ -1329,13 +1329,13 @@ static int colorClose(void* handle)
 bool GNWSystemError(const char* text)
 {
     SDL_Cursor* prev = SDL_GetCursor();
-    SDL_Cursor* cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+    SDL_Cursor* cursor = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
     SDL_SetCursor(cursor);
-    SDL_ShowCursor(SDL_ENABLE);
+    SDL_ShowCursor();
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, NULL, text, NULL);
-    SDL_ShowCursor(SDL_DISABLE);
+    SDL_HideCursor();
     SDL_SetCursor(prev);
-    SDL_FreeCursor(cursor);
+    SDL_DestroyCursor(cursor);
     return true;
 }
 

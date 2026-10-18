@@ -19,10 +19,6 @@ endif()
 
 project(${EXECUTABLE_NAME})
 
-if (NXDK) 
-include(FindPkgConfig)
-endif()
-
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
@@ -31,12 +27,12 @@ set(CMAKE_C_FLAGS_DEBUG "-g -Wall -Wextra")
 set(CMAKE_CXX_FLAGS_RELEASE "-Ofast")
 set(CMAKE_C_FLAGS_RELEASE "-Ofast")
 
-# Custom toggle for building with experimental hardware accelerated SDL2
-option(USE_PBKIT "Import PBKit for use with hardware accelerated SDL2" OFF)
-
 # Stop lots of warning spam
 add_compile_options(-Wno-builtin-macro-redefined)
-add_definitions(-DXBOX -DNXDK)
+
+if(NXDK)
+    add_definitions(-DXBOX -DNXDK)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
@@ -369,15 +365,43 @@ if(APPLE)
     set(MACOSX_BUNDLE_BUNDLE_VERSION "1.0.0")
 endif()
 
-if((NOT ${CMAKE_SYSTEM_NAME} MATCHES "Linux") AND (NOT ${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD") AND (NOT ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD") AND (NOT NXDK))
-    add_subdirectory("third_party/sdl2")
-else()
-    if(NXDK)
-    pkg_search_module(SDL2 REQUIRED sdl2)
-    pkg_search_module(SDL2_TTF REQUIRED SDL2_ttf)
-    else()
-    find_package(SDL2)
+if(NXDK)
+    # Hardware accelerated SDL3 for nxdk: https://github.com/Ryzee119/nxdk-sdl3
+    # Point the build at a local checkout with -DNXDK_SDL3_DIR=/path/to/nxdk-sdl3,
+    # or set the NXDK_SDL3_DIR environment variable. If neither is given a few
+    # well known locations are probed before falling back to fetching it.
+    set(NXDK_SDL3_DIR "$ENV{NXDK_SDL3_DIR}" CACHE PATH "Path to a local nxdk-sdl3 checkout")
+
+    if(NOT NXDK_SDL3_DIR)
+        foreach(candidate
+            "${CMAKE_CURRENT_SOURCE_DIR}/third_party/nxdk-sdl3"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../nxdk-sdl3"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../nxdk-sdl3"
+            "$ENV{NXDK_DIR}/../nxdk-sdl3")
+            if(EXISTS "${candidate}/CMakeLists.txt")
+                get_filename_component(NXDK_SDL3_DIR "${candidate}" ABSOLUTE)
+                break()
+            endif()
+        endforeach()
     endif()
+
+    if(NXDK_SDL3_DIR AND EXISTS "${NXDK_SDL3_DIR}/CMakeLists.txt")
+        message(STATUS "Using nxdk-sdl3 from ${NXDK_SDL3_DIR}")
+        add_subdirectory("${NXDK_SDL3_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/nxdk-sdl3")
+    else()
+        message(STATUS "Fetching nxdk-sdl3...")
+        include(FetchContent)
+        FetchContent_Declare(nxdk_sdl3
+            GIT_REPOSITORY "https://github.com/Ryzee119/nxdk-sdl3.git"
+            GIT_TAG master
+            GIT_PROGRESS TRUE
+        )
+        FetchContent_MakeAvailable(nxdk_sdl3)
+    endif()
+elseif((NOT ${CMAKE_SYSTEM_NAME} MATCHES "Linux") AND (NOT ${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD") AND (NOT ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD"))
+    add_subdirectory("third_party/sdl3")
+else()
+    find_package(SDL3 REQUIRED CONFIG)
 endif()
 
 add_subdirectory("third_party/adecode")
@@ -386,14 +410,8 @@ target_link_libraries(${EXECUTABLE_NAME} adecode::adecode)
 add_subdirectory("third_party/fpattern")
 target_link_libraries(${EXECUTABLE_NAME} fpattern::fpattern)
 
-if(USE_PBKIT)
-    message(STATUS "Importing PBKit for hardware accelerated SDL2 branch")
-    target_link_libraries(${EXECUTABLE_NAME} ${SDL2_LIBRARIES} ${SDL2_TTF_LIBRARIES} ${NXDK_DIR}/lib/libpbkit.lib)
-else()
-    message(STATUS "Importing default NXDK SDL2 libraries")
-    target_link_libraries(${EXECUTABLE_NAME} ${SDL2_LIBRARIES} ${SDL2_TTF_LIBRARIES})
-endif()
-target_include_directories(${EXECUTABLE_NAME} PRIVATE ${SDL2_INCLUDE_DIRS} ${SDL2_TTF_INCLUDE_DIRS})
+target_link_libraries(${EXECUTABLE_NAME} SDL3::SDL3)
+target_link_libraries(${EXECUTABLE_NAME} SDL3::Headers)
 
 if(APPLE)
     if(IOS)

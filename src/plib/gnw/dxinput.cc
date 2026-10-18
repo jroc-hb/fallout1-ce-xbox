@@ -1,5 +1,8 @@
 #include "plib/gnw/dxinput.h"
 
+#include "plib/gnw/gamepad.hpp"
+#include "plib/gnw/svga.h"
+
 namespace fallout {
 
 static bool dxinput_mouse_init();
@@ -13,10 +16,15 @@ static int gMouseWheelDeltaY = 0;
 // 0x4E0400
 bool dxinput_init()
 {
-    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
-    if (SDL_InitSubSystem(SDL_INIT_EVENTS | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0) {
+    if (!SDL_InitSubSystem(SDL_INIT_EVENTS | SDL_INIT_JOYSTICK | SDL_INIT_GAMEPAD)) {
         return false;
     }
+
+    // Promotes joysticks SDL doesn't recognise - the Original Xbox controller
+    // among them - to gamepads. Registering the mapping after init is fine:
+    // SDL re-evaluates already attached joysticks and emits the
+    // SDL_EVENT_GAMEPAD_ADDED events the input loop is waiting for.
+    GamepadRegisterDefaultMapping();
 
     if (!dxinput_mouse_init()) {
         goto err;
@@ -64,9 +72,13 @@ bool dxinput_get_mouse_state(MouseData* mouseState)
     // update mouse position manually.
     SDL_PumpEvents();
 
-    Uint32 buttons = SDL_GetRelativeMouseState(&(mouseState->x), &(mouseState->y));
-    mouseState->buttons[0] = (buttons & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
-    mouseState->buttons[1] = (buttons & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0;
+    float deltaX;
+    float deltaY;
+    SDL_MouseButtonFlags buttons = SDL_GetRelativeMouseState(&deltaX, &deltaY);
+    mouseState->x = static_cast<int>(deltaX);
+    mouseState->y = static_cast<int>(deltaY);
+    mouseState->buttons[0] = (buttons & SDL_BUTTON_LMASK) != 0;
+    mouseState->buttons[1] = (buttons & SDL_BUTTON_RMASK) != 0;
     mouseState->wheelX = gMouseWheelDeltaX;
     mouseState->wheelY = gMouseWheelDeltaY;
 
@@ -91,7 +103,7 @@ bool dxinput_unacquire_keyboard()
 // 0x4E05FC
 bool dxinput_flush_keyboard_buffer()
 {
-    SDL_FlushEvents(SDL_KEYDOWN, SDL_TEXTINPUT);
+    SDL_FlushEvents(SDL_EVENT_KEY_DOWN, SDL_EVENT_TEXT_INPUT);
     return true;
 }
 
@@ -107,7 +119,7 @@ bool dxinput_mouse_init()
 #ifdef NXDK
     return true;
 #else
-    return SDL_SetRelativeMouseMode(SDL_TRUE) == 0;
+    return SDL_SetWindowRelativeMouseMode(gSdlWindow, true);
 #endif
 }
 
@@ -132,9 +144,9 @@ void handleMouseEvent(SDL_Event* event)
     // Mouse movement and buttons are accumulated in SDL itself and will be
     // processed later in `mouseDeviceGetData` via `SDL_GetRelativeMouseState`.
 
-    if (event->type == SDL_MOUSEWHEEL) {
-        gMouseWheelDeltaX += event->wheel.x;
-        gMouseWheelDeltaY += event->wheel.y;
+    if (event->type == SDL_EVENT_MOUSE_WHEEL) {
+        gMouseWheelDeltaX += static_cast<int>(event->wheel.x);
+        gMouseWheelDeltaY += static_cast<int>(event->wheel.y);
     }
 }
 

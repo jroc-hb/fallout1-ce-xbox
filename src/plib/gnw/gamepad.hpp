@@ -1,7 +1,7 @@
 #ifndef FALLOUT_PLIB_GNW_GAMEPAD_H_
 #define FALLOUT_PLIB_GNW_GAMEPAD_H_
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include "plib/gnw/rect.h"
 #include "plib/gnw/dxinput.h"
@@ -12,6 +12,7 @@ extern float leftStickX, leftStickY, rightStickX, rightStickY;
 
 bool GetGamepadMouseState(MouseData* mouseState);
 void GamepadInit();
+void GamepadRegisterDefaultMapping();
 void HandleJoystickDeviceAdded(const SDL_Event& event);
 void HandleJoystickDeviceRemoved(const SDL_Event& event);
 void HandleControllerDeviceAdded(const SDL_Event& event);

@@ -1,6 +1,8 @@
 #ifndef FALLOUT_FPS_LIMITER_H_
 #define FALLOUT_FPS_LIMITER_H_
 
+#include <SDL3/SDL.h>
+
 namespace fallout {
 
 class FpsLimiter {
@@ -11,7 +13,7 @@ public:
 
 private:
     const unsigned int _fps;
-    unsigned int _ticks;
+    Uint64 _ticks;
 };
 
 } // namespace fallout

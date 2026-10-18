@@ -1,7 +1,7 @@
 #ifndef FALLOUT_PLIB_GNW_SVGA_H_
 #define FALLOUT_PLIB_GNW_SVGA_H_
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include "fps_limiter.h"
 #include "plib/gnw/rect.h"

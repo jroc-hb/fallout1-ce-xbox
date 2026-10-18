@@ -1,7 +1,7 @@
 #ifndef FALLOUT_PLIB_GNW_DXINPUT_H_
 #define FALLOUT_PLIB_GNW_DXINPUT_H_
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 namespace fallout {
 

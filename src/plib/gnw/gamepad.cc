@@ -1,7 +1,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include "plib/gnw/debug.h"
 #include "plib/gnw/gamepad.hpp"
@@ -16,7 +16,7 @@
 
 namespace fallout {
 
-static SDL_GameController* gController = nullptr;
+static SDL_Gamepad* gController = nullptr;
 
 // Gamepad settings read from config on init.
 // Deadzone: whole-number percentage (0-100), converted to [0.0..1.0] at use.
@@ -183,7 +183,7 @@ void ReleaseChordKey()
 
         bool GetScrollDelta(int* outX, int* outY, float divisor)
         {
-            const Uint32 tc = SDL_GetTicks();
+            const Uint64 tc = SDL_GetTicks();
             const int dtc = static_cast<int>(tc - lastTc);
             lastTc = tc;
 
@@ -227,7 +227,7 @@ void ReleaseChordKey()
             hiresDY = 0.0f;
         }
 
-        Uint32 lastTc;
+        Uint64 lastTc;
         float  hiresDX;
         float  hiresDY;
     };
@@ -243,8 +243,8 @@ void ReleaseChordKey()
 
         void Pool(int* x, int* y, float slowdown)
         {
-            const Uint32 tc = SDL_GetTicks();
-            const int dtc = tc - lastTc;
+            const Uint64 tc = SDL_GetTicks();
+            const int dtc = static_cast<int>(tc - lastTc);
             hiresDX += leftStickX * dtc;
             hiresDY += leftStickY * dtc;
             const int dx = static_cast<int>(hiresDX / slowdown);
@@ -263,7 +263,7 @@ void ReleaseChordKey()
             hiresDY = 0.0f;
         }
 
-        uint32_t lastTc;
+        Uint64 lastTc;
         float hiresDX;
         float hiresDY;
     };
@@ -274,24 +274,24 @@ float leftStickX, leftStickY, rightStickX, rightStickY;
 
 void HandleControllerAxisMotion(const SDL_Event& event)
 {
-    switch (event.caxis.axis) {
-    case SDL_CONTROLLER_AXIS_LEFTX:
-        leftStickXUnscaled = static_cast<float>(event.caxis.value);
+    switch (event.gaxis.axis) {
+    case SDL_GAMEPAD_AXIS_LEFTX:
+        leftStickXUnscaled = static_cast<float>(event.gaxis.value);
         ScaleLeftJoystick();
         break;
 
-    case SDL_CONTROLLER_AXIS_LEFTY:
-        leftStickYUnscaled = static_cast<float>(-event.caxis.value);
+    case SDL_GAMEPAD_AXIS_LEFTY:
+        leftStickYUnscaled = static_cast<float>(-event.gaxis.value);
         ScaleLeftJoystick();
         break;
 
-    case SDL_CONTROLLER_AXIS_RIGHTX:
-        rightStickXUnscaled = static_cast<float>(event.caxis.value);
+    case SDL_GAMEPAD_AXIS_RIGHTX:
+        rightStickXUnscaled = static_cast<float>(event.gaxis.value);
         ScaleRightJoystick();
         break;
 
-    case SDL_CONTROLLER_AXIS_RIGHTY:
-        rightStickYUnscaled = static_cast<float>(-event.caxis.value);
+    case SDL_GAMEPAD_AXIS_RIGHTY:
+        rightStickYUnscaled = static_cast<float>(-event.gaxis.value);
         ScaleRightJoystick();
         break;
 
@@ -299,11 +299,11 @@ void HandleControllerAxisMotion(const SDL_Event& event)
     // Full press -> 25% speed, half press -> 62.5% speed, etc.
     // Speed multiplier = 1.0 - triggerValue * 0.75 (applied in ProcessLeftStick).
     // Also gates the d-pad chord mapping when >= kChordTriggerThreshold.
-    case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
+    case SDL_GAMEPAD_AXIS_LEFT_TRIGGER:
         {
             const float prev = gLeftTriggerValue;
             gLeftTriggerValue = std::max(0.0f, std::min(1.0f,
-                static_cast<float>(event.caxis.value) / 32767.0f));
+                static_cast<float>(event.gaxis.value) / 32767.0f));
 
             // If the trigger drops below the chord threshold, release any held
             // chord key so it doesn't get stuck.
@@ -314,9 +314,9 @@ void HandleControllerAxisMotion(const SDL_Event& event)
         break;
 
     // Right trigger: simple left mouse click (held while trigger is pressed).
-    case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
+    case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER:
         gRightTriggerValue = std::max(0.0f, std::min(1.0f,
-            static_cast<float>(event.caxis.value) / 32767.0f));
+            static_cast<float>(event.gaxis.value) / 32767.0f));
         break;
     }
 }
@@ -326,58 +326,58 @@ void HandleControllerButtonUp(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
 
-    switch (event.cbutton.button) {
-    case SDL_CONTROLLER_BUTTON_A: // Left Mouse Click
+    switch (event.gbutton.button) {
+    case SDL_GAMEPAD_BUTTON_SOUTH: // Left Mouse Click
         gAButtonHeld = false;
         break;
 
-    case SDL_CONTROLLER_BUTTON_B: // Right MouseClick
+    case SDL_GAMEPAD_BUTTON_EAST: // Right MouseClick
         gGamepadRightClick = 0;
         break;
 
-    case SDL_CONTROLLER_BUTTON_X: // Inventory (I)
+    case SDL_GAMEPAD_BUTTON_WEST: // Inventory (I)
         simulatedKeyboardKey = {SDL_SCANCODE_I, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_Y: // Pip-Boy (P)
+    case SDL_GAMEPAD_BUTTON_NORTH: // Pip-Boy (P)
         simulatedKeyboardKey = {SDL_SCANCODE_P, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_BACK: // Toggle Active Items (B)
+    case SDL_GAMEPAD_BUTTON_BACK: // Toggle Active Items (B)
         simulatedKeyboardKey = {SDL_SCANCODE_B, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_START: // Options Menu (Esc)
+    case SDL_GAMEPAD_BUTTON_START: // Options Menu (Esc)
         simulatedKeyboardKey = {SDL_SCANCODE_ESCAPE, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_LEFTSTICK: // Skilldex (S)
+    case SDL_GAMEPAD_BUTTON_LEFT_STICK: // Skilldex (S)
         simulatedKeyboardKey = {SDL_SCANCODE_S, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_RIGHTSTICK: // Center Camera on Player (Home)
+    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: // Center Camera on Player (Home)
         simulatedKeyboardKey = {SDL_SCANCODE_HOME, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: // [Black Button] Exit Combat (Enter)
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: // [Black Button] Exit Combat (Enter)
         simulatedKeyboardKey = {SDL_SCANCODE_KP_ENTER, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: // [White Button] End Turn (Space)
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: // [White Button] End Turn (Space)
         simulatedKeyboardKey = {SDL_SCANCODE_SPACE, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
     // D-pad: update held state, then either release the chord key (trigger held)
     // or send the normal arrow key release.
-    case SDL_CONTROLLER_BUTTON_DPAD_UP:
+    case SDL_GAMEPAD_BUTTON_DPAD_UP:
         gDpadUp = false;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
             ReleaseChordKey();
@@ -387,7 +387,7 @@ void HandleControllerButtonUp(const SDL_Event& event)
         }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
         gDpadDown = false;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
             ReleaseChordKey();
@@ -397,7 +397,7 @@ void HandleControllerButtonUp(const SDL_Event& event)
         }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
         gDpadLeft = false;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
             ReleaseChordKey();
@@ -407,7 +407,7 @@ void HandleControllerButtonUp(const SDL_Event& event)
         }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
         gDpadRight = false;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
             ReleaseChordKey();
@@ -426,51 +426,51 @@ void HandleControllerButtonUp(const SDL_Event& event)
 void HandleControllerButtonDown(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
-    switch (event.cbutton.button) {
-    case SDL_CONTROLLER_BUTTON_A: // Left Click
+    switch (event.gbutton.button) {
+    case SDL_GAMEPAD_BUTTON_SOUTH: // Left Click
         gAButtonHeld = true;
         break;
 
-    case SDL_CONTROLLER_BUTTON_B: // Right Click
+    case SDL_GAMEPAD_BUTTON_EAST: // Right Click
         gGamepadRightClick = 1;
         break;
 
-    case SDL_CONTROLLER_BUTTON_X: // Inventory (I)
+    case SDL_GAMEPAD_BUTTON_WEST: // Inventory (I)
         simulatedKeyboardKey = {SDL_SCANCODE_I, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_Y: // Pip-Boy (P)
+    case SDL_GAMEPAD_BUTTON_NORTH: // Pip-Boy (P)
         simulatedKeyboardKey = {SDL_SCANCODE_P, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_BACK: // Toggle Active Items (B)
+    case SDL_GAMEPAD_BUTTON_BACK: // Toggle Active Items (B)
         simulatedKeyboardKey = {SDL_SCANCODE_B, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_START: // Options Menu (Esc)
+    case SDL_GAMEPAD_BUTTON_START: // Options Menu (Esc)
         simulatedKeyboardKey = {SDL_SCANCODE_ESCAPE, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_LEFTSTICK: // Skilldex (S)
+    case SDL_GAMEPAD_BUTTON_LEFT_STICK: // Skilldex (S)
         simulatedKeyboardKey = {SDL_SCANCODE_S, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_RIGHTSTICK: // Center Camera on Player (Home)
+    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: // Center Camera on Player (Home)
         simulatedKeyboardKey = {SDL_SCANCODE_HOME, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER: // [Black Button] Exit Combat (Enter)
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: // [Black Button] Exit Combat (Enter)
         simulatedKeyboardKey = {SDL_SCANCODE_KP_ENTER, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: // [White Button] End Turn (Space)
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: // [White Button] End Turn (Space)
         simulatedKeyboardKey = {SDL_SCANCODE_SPACE, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
@@ -485,7 +485,7 @@ void HandleControllerButtonDown(const SDL_Event& event)
     // For diagonals the second button pressed resolves the final chord key.
     // The previous chord key is always released before the new one fires so
     // the game never sees two digit keys down at once.
-    case SDL_CONTROLLER_BUTTON_DPAD_UP:
+    case SDL_GAMEPAD_BUTTON_DPAD_UP:
         gDpadUp = true;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
             ReleaseChordKey();
@@ -500,7 +500,7 @@ void HandleControllerButtonDown(const SDL_Event& event)
         }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_DOWN:
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
         gDpadDown = true;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
             ReleaseChordKey();
@@ -515,7 +515,7 @@ void HandleControllerButtonDown(const SDL_Event& event)
         }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_LEFT:
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
         gDpadLeft = true;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
             ReleaseChordKey();
@@ -530,7 +530,7 @@ void HandleControllerButtonDown(const SDL_Event& event)
         }
         break;
 
-    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
         gDpadRight = true;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
             ReleaseChordKey();
@@ -595,8 +595,10 @@ void ProcessLeftStick()
     leftStickX *= speedMult;
     leftStickY *= speedMult;
 
-    int x, y;
-    SDL_GetRelativeMouseState(&x, &y);
+    float relX, relY;
+    SDL_GetRelativeMouseState(&relX, &relY);
+    const int x = static_cast<int>(relX);
+    const int y = static_cast<int>(relY);
     int newX = x;
     int newY = y;
     acc.Pool(&newX, &newY, gLeftStickInternalDivisor);
@@ -641,52 +643,74 @@ void ProcessTriggers()
 }
 
 
+void GamepadRegisterDefaultMapping()
+{
+    // SDL3's mapping database has no entry for the Original Xbox controller's
+    // USB VID/PID, and the nxdk joystick driver does not supply one either, so
+    // without this every pad would be seen as a plain joystick and no
+    // SDL_EVENT_GAMEPAD_* events would ever arrive.
+    //
+    // The driver already reports axes and buttons in SDL_GAMEPAD_AXIS_* /
+    // SDL_GAMEPAD_BUTTON_* order and the d-pad as hat 0, so the mapping below is
+    // just the identity. Registering it under the "default" GUID makes SDL apply
+    // it to any pad it doesn't otherwise recognise, matching what the nxdk SDL2
+    // library hardcoded internally.
+    static const char kDefaultMapping[] =
+        "default,Original Xbox Controller,"
+        "a:b0,b:b1,x:b2,y:b3,"
+        "back:b4,guide:b5,start:b6,"
+        "leftstick:b7,rightstick:b8,"
+        "leftshoulder:b9,rightshoulder:b10,"
+        "dpup:h0.1,dpright:h0.2,dpdown:h0.4,dpleft:h0.8,"
+        "leftx:a0,lefty:a1,rightx:a2,righty:a3,"
+        "lefttrigger:a4,righttrigger:a5,";
+
+    if (SDL_AddGamepadMapping(kDefaultMapping) < 0) {
+        debug_printf("Failed to register default gamepad mapping: %s\n", SDL_GetError());
+        SDL_ClearError();
+    }
+}
+
 void HandleJoystickDeviceAdded(const SDL_Event& event)
 {
-    const int32_t deviceIndex = event.jdevice.which;
-    if (SDL_NumJoysticks() <= deviceIndex)
-        return;
-    debug_printf("Adding joystick %d: %s\n", deviceIndex,
-        SDL_JoystickNameForIndex(deviceIndex));
-    SDL_Joystick* const joystick = SDL_JoystickOpen(deviceIndex);
+    const SDL_JoystickID instanceId = event.jdevice.which;
+    debug_printf("Adding joystick %u: %s\n", (unsigned int)instanceId,
+        SDL_GetJoystickNameForID(instanceId));
+    SDL_Joystick* const joystick = SDL_OpenJoystick(instanceId);
     if (joystick == nullptr) {
         debug_printf("%s", SDL_GetError());
         SDL_ClearError();
         return;
     }
-    SDL_JoystickGUID guid = SDL_JoystickGetGUID(joystick);
+    SDL_GUID guid = SDL_GetJoystickGUID(joystick);
     char guidBuf[33];
-    SDL_JoystickGetGUIDString(guid, guidBuf, sizeof(guidBuf));
-    debug_printf("Added joystick %d {%s}\n", deviceIndex, guidBuf);
+    SDL_GUIDToString(guid, guidBuf, sizeof(guidBuf));
+    debug_printf("Added joystick %u {%s}\n", (unsigned int)instanceId, guidBuf);
 }
 
 void HandleJoystickDeviceRemoved(const SDL_Event& event)
 {
-    const int32_t deviceIndex = event.jdevice.which;
-    debug_printf("Removed joystick %d\n", deviceIndex);
+    debug_printf("Removed joystick %u\n", (unsigned int)event.jdevice.which);
 }
 
 void HandleControllerDeviceAdded(const SDL_Event& event)
 {
-    const int32_t joystickIndex = event.cdevice.which;
-    debug_printf("Opening game controller for joystick %d\n", joystickIndex);
+    const SDL_JoystickID instanceId = event.gdevice.which;
+    debug_printf("Opening game controller for joystick %u\n", (unsigned int)instanceId);
 
-    if (!SDL_IsGameController(joystickIndex)) {
-        debug_printf("Device at index %d is not a compatible game controller.\n", joystickIndex);
+    if (!SDL_IsGamepad(instanceId)) {
+        debug_printf("Device %u is not a compatible game controller.\n", (unsigned int)instanceId);
         return;
     }
 
-    gController = SDL_GameControllerOpen(joystickIndex);
+    gController = SDL_OpenGamepad(instanceId);
     if (gController == nullptr) {
         debug_printf("Failed to open game controller: %s\n", SDL_GetError());
         SDL_ClearError();
         return;
     }
 
-    SDL_Joystick* sdlJoystick = SDL_GameControllerGetJoystick(gController);
-    SDL_JoystickGUID guid = SDL_JoystickGetGUID(sdlJoystick);
-
-    char* mapping = SDL_GameControllerMappingForGUID(guid);
+    char* mapping = SDL_GetGamepadMapping(gController);
     if (mapping != nullptr) {
         debug_printf("Opened game controller with mapping:\n%s\n", mapping);
         SDL_free(mapping);
@@ -696,10 +720,10 @@ void HandleControllerDeviceAdded(const SDL_Event& event)
 void HandleControllerDeviceRemoved(const SDL_Event& event)
 {
     if (gController != nullptr) {
-        SDL_GameController* controller = SDL_GameControllerFromInstanceID(event.cdevice.which);
+        SDL_Gamepad* controller = SDL_GetGamepadFromID(event.gdevice.which);
         if (controller == gController) {
-            debug_printf("Removed game controller for joystick %d\n", event.cdevice.which);
-            SDL_GameControllerClose(gController);
+            debug_printf("Removed game controller for joystick %u\n", (unsigned int)event.gdevice.which);
+            SDL_CloseGamepad(gController);
             gController = nullptr;
         }
     }

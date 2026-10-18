@@ -26,9 +26,9 @@ struct Touch {
     bool used;
     SDL_FingerID fingerId;
     TouchLocation startLocation;
-    Uint32 startTimestamp;
+    Uint64 startTimestamp;
     TouchLocation currentLocation;
-    Uint32 currentTimestamp;
+    Uint64 currentTimestamp;
     int phase;
 };
 
@@ -89,7 +89,7 @@ void touch_handle_start(SDL_TouchFingerEvent* event)
     // On iOS `fingerId` is an address of underlying `UITouch` object. When
     // `touchesBegan` is called this object might be reused, but with
     // incresed `tapCount` (which is ignored in this implementation).
-    int index = find_touch(event->fingerId);
+    int index = find_touch(event->fingerID);
     if (index == -1) {
         index = find_unused_touch_index();
     }
@@ -97,8 +97,8 @@ void touch_handle_start(SDL_TouchFingerEvent* event)
     if (index != -1) {
         Touch* touch = &(touches[index]);
         touch->used = true;
-        touch->fingerId = event->fingerId;
-        touch->startTimestamp = event->timestamp;
+        touch->fingerId = event->fingerID;
+        touch->startTimestamp = SDL_NS_TO_MS(event->timestamp);
         touch->startLocation.x = static_cast<int>(event->x * screenGetWidth());
         touch->startLocation.y = static_cast<int>(event->y * screenGetHeight());
         touch->currentTimestamp = touch->startTimestamp;
@@ -109,10 +109,10 @@ void touch_handle_start(SDL_TouchFingerEvent* event)
 
 void touch_handle_move(SDL_TouchFingerEvent* event)
 {
-    int index = find_touch(event->fingerId);
+    int index = find_touch(event->fingerID);
     if (index != -1) {
         Touch* touch = &(touches[index]);
-        touch->currentTimestamp = event->timestamp;
+        touch->currentTimestamp = SDL_NS_TO_MS(event->timestamp);
         touch->currentLocation.x = static_cast<int>(event->x * screenGetWidth());
         touch->currentLocation.y = static_cast<int>(event->y * screenGetHeight());
         touch->phase = TOUCH_PHASE_MOVED;
@@ -121,10 +121,10 @@ void touch_handle_move(SDL_TouchFingerEvent* event)
 
 void touch_handle_end(SDL_TouchFingerEvent* event)
 {
-    int index = find_touch(event->fingerId);
+    int index = find_touch(event->fingerID);
     if (index != -1) {
         Touch* touch = &(touches[index]);
-        touch->currentTimestamp = event->timestamp;
+        touch->currentTimestamp = SDL_NS_TO_MS(event->timestamp);
         touch->currentLocation.x = static_cast<int>(event->x * screenGetWidth());
         touch->currentLocation.y = static_cast<int>(event->y * screenGetHeight());
         touch->phase = TOUCH_PHASE_ENDED;
@@ -133,7 +133,7 @@ void touch_handle_end(SDL_TouchFingerEvent* event)
 
 void touch_process_gesture()
 {
-    Uint32 sequenceStartTimestamp = -1;
+    Uint64 sequenceStartTimestamp = (Uint64)-1;
     int sequenceStartIndex = -1;
 
     // Find start of sequence (earliest touch).
@@ -150,7 +150,7 @@ void touch_process_gesture()
         return;
     }
 
-    Uint32 sequenceEndTimestamp = -1;
+    Uint64 sequenceEndTimestamp = (Uint64)-1;
     if (touches[sequenceStartIndex].phase == TOUCH_PHASE_ENDED) {
         sequenceEndTimestamp = touches[sequenceStartIndex].currentTimestamp;
 
@@ -168,7 +168,7 @@ void touch_process_gesture()
                     }
                 } else {
                     // Sequence is current.
-                    sequenceEndTimestamp = -1;
+                    sequenceEndTimestamp = (Uint64)-1;
                     break;
                 }
             }
@@ -194,7 +194,7 @@ void touch_process_gesture()
             }
 
             // If this sequence is over, unmark participating finger as used.
-            if (sequenceEndTimestamp != -1) {
+            if (sequenceEndTimestamp != (Uint64)-1) {
                 touches[index].used = false;
             }
         }
@@ -217,17 +217,17 @@ void touch_process_gesture()
         }
 
         // Reset continuous gesture if when current sequence is over.
-        if (currentGesture.state == kEnded && sequenceEndTimestamp != -1) {
+        if (currentGesture.state == kEnded && sequenceEndTimestamp != (Uint64)-1) {
             currentGesture.type = kUnrecognized;
         }
     } else {
         if (activeCount == 0 && endedCount != 0) {
             // For taps we need all participating fingers to be both started
             // and ended simultaneously (within predefined threshold).
-            Uint32 startEarliestTimestamp = -1;
-            Uint32 startLatestTimestamp = 0;
-            Uint32 endEarliestTimestamp = -1;
-            Uint32 endLatestTimestamp = 0;
+            Uint64 startEarliestTimestamp = (Uint64)-1;
+            Uint64 startLatestTimestamp = 0;
+            Uint64 endEarliestTimestamp = (Uint64)-1;
+            Uint64 endLatestTimestamp = 0;
 
             for (int index = 0; index < endedCount; index++) {
                 startEarliestTimestamp = std::min(startEarliestTimestamp, touches[ended[index]].startTimestamp);

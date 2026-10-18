@@ -1,7 +1,7 @@
 #ifndef MOVIE_LIB_H
 #define MOVIE_LIB_H
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 namespace fallout {
 

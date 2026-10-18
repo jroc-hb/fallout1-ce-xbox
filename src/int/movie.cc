@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include "game/gconfig.h"
 #include "game/moviefx.h"
@@ -300,7 +300,7 @@ static void movie_MVE_ShowFrame(SDL_Surface* surface, int srcWidth, int srcHeigh
     destRect.y += winRect.uly;
 
     if (movieCaptureFrameFunc != NULL) {
-        if (SDL_LockSurface(surface) == 0) {
+        if (SDL_LockSurface(surface)) {
             movieCaptureFrameFunc(static_cast<unsigned char*>(surface->pixels),
                 srcWidth,
                 srcHeight,
@@ -313,7 +313,7 @@ static void movie_MVE_ShowFrame(SDL_Surface* surface, int srcWidth, int srcHeigh
         }
     }
 
-    SDL_SetSurfacePalette(surface, gSdlSurface->format->palette);
+    SDL_SetSurfacePalette(surface, SDL_GetSurfacePalette(gSdlSurface));
     SDL_BlitSurface(surface, &srcRect, gSdlSurface, &destRect);
 
 #ifdef NXDK
@@ -349,7 +349,7 @@ static void movieShowFrame(SDL_Surface* a1, int a2, int a3, int a4, int a5, int 
     lastMovieSX = a4;
     lastMovieSY = a5;
 
-    if (SDL_LockSurface(a1) != 0) {
+    if (!SDL_LockSurface(a1)) {
         return;
     }
 
@@ -527,7 +527,7 @@ static void cleanupMovie(int a1)
     }
 
     if (gMovieSdlSurface != NULL) {
-        if (SDL_LockSurface(gMovieSdlSurface) == 0) {
+        if (SDL_LockSurface(gMovieSdlSurface)) {
             lastMovieBuffer = (unsigned char*)mymalloc(lastMovieBH * lastMovieBW, __FILE__, __LINE__); // "..\\int\\MOVIE.C", 802
             buf_to_buf((unsigned char*)gMovieSdlSurface->pixels + gMovieSdlSurface->pitch * lastMovieSX + lastMovieSY, lastMovieBW, lastMovieBH, gMovieSdlSurface->pitch, lastMovieBuffer, lastMovieBW);
             SDL_UnlockSurface(gMovieSdlSurface);

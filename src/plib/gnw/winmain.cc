@@ -1,8 +1,9 @@
 #include "plib/gnw/winmain.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -57,18 +58,16 @@ int main(int argc, char* argv[])
 #endif
 
 #if __APPLE__ && TARGET_OS_OSX
-    char* basePath = SDL_GetBasePath();
-    chdir(basePath);
-    SDL_free(basePath);
+    chdir(SDL_GetBasePath());
 #endif
 
 #if __ANDROID__
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
-    chdir(SDL_AndroidGetExternalStoragePath());
+    chdir(SDL_GetAndroidExternalStoragePath());
 #endif
 
-    SDL_ShowCursor(SDL_DISABLE);
+    SDL_HideCursor();
 
     GNW95_isActive = true;
     rc = gnw_main(argc, argv);

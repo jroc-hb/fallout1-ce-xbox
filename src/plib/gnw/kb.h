@@ -1,7 +1,7 @@
 #ifndef FALLOUT_PLIB_GNW_KB_H_
 #define FALLOUT_PLIB_GNW_KB_H_
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include "plib/gnw/dxinput.h"
 
@@ -338,7 +338,7 @@ typedef enum Key {
     KEY_LAST_INPUT_CHARACTER = KEY_LOWERCASE_Z,
 } Key;
 
-extern unsigned char keys[SDL_NUM_SCANCODES];
+extern unsigned char keys[SDL_SCANCODE_COUNT];
 extern int kb_layout;
 extern unsigned char keynumpress;
 
