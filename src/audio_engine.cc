@@ -1,4 +1,5 @@
 #include "audio_engine.h"
+#include "plib/gnw/bcdebug.h" // TEMP-HANG-DEBUG
 
 #include <stdlib.h>
 #include <string.h>
@@ -77,7 +78,9 @@ static void audioEngineMixinChunk(Uint8* output, int length)
 
     for (int index = 0; index < AUDIO_ENGINE_SOUND_BUFFERS; index++) {
         AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[index]);
+        BC_AUDIO("ae:wait:L81");
         std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+        BC_AUDIO("ae:held:L81");
 
         if (soundBuffer->active && soundBuffer->playing) {
             int srcFrameSize = soundBuffer->bitsPerSample / 8 * soundBuffer->channels;
@@ -147,6 +150,7 @@ static void SDLCALL audioEngineMixin(void* userData, SDL_AudioStream* stream, in
     (void)userData;
     (void)totalAmount;
 
+    BC_AUDIO("mix:enter");
     while (additionalAmount > 0) {
         int length = additionalAmount;
         if (length > AUDIO_ENGINE_MIX_BUFFER_SIZE) {
@@ -158,6 +162,7 @@ static void SDLCALL audioEngineMixin(void* userData, SDL_AudioStream* stream, in
 
         additionalAmount -= length;
     }
+    BC_AUDIO("mix:done");
 }
 
 bool audioEngineInit()
@@ -257,7 +262,9 @@ int audioEngineCreateSoundBuffer(unsigned int size, int bitsPerSample, int chann
 
     for (int index = 0; index < AUDIO_ENGINE_SOUND_BUFFERS; index++) {
         AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[index]);
+        BC_MAIN("ae:wait:L261");
         std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+        BC_MAIN("ae:held:L261");
 
         if (!soundBuffer->active) {
             soundBuffer->active = true;
@@ -293,7 +300,9 @@ bool audioEngineSoundBufferRelease(int soundBufferIndex)
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    BC_MAIN("ae:wait:L297");
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+    BC_MAIN("ae:held:L297");
 
     if (!soundBuffer->active) {
         return false;
@@ -321,7 +330,9 @@ bool audioEngineSoundBufferSetVolume(int soundBufferIndex, int volume)
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    BC_MAIN("ae:wait:L325");
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+    BC_MAIN("ae:held:L325");
 
     if (!soundBuffer->active) {
         return false;
@@ -343,7 +354,9 @@ bool audioEngineSoundBufferGetVolume(int soundBufferIndex, int* volumePtr)
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    BC_MAIN("ae:wait:L347");
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+    BC_MAIN("ae:held:L347");
 
     if (!soundBuffer->active) {
         return false;
@@ -365,7 +378,9 @@ bool audioEngineSoundBufferSetPan(int soundBufferIndex, int pan)
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    BC_MAIN("ae:wait:L369");
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+    BC_MAIN("ae:held:L369");
 
     if (!soundBuffer->active) {
         return false;
@@ -388,7 +403,9 @@ bool audioEngineSoundBufferPlay(int soundBufferIndex, unsigned int flags)
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    BC_MAIN("ae:wait:L392");
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+    BC_MAIN("ae:held:L392");
 
     if (!soundBuffer->active) {
         return false;
@@ -414,7 +431,9 @@ bool audioEngineSoundBufferStop(int soundBufferIndex)
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    BC_MAIN("ae:wait:L418");
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+    BC_MAIN("ae:held:L418");
 
     if (!soundBuffer->active) {
         return false;
@@ -439,7 +458,9 @@ bool audioEngineSoundBufferGetCurrentPosition(int soundBufferIndex, unsigned int
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    BC_MAIN("ae:wait:L443");
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+    BC_MAIN("ae:held:L443");
 
     if (!soundBuffer->active) {
         return false;
@@ -474,7 +495,9 @@ bool audioEngineSoundBufferSetCurrentPosition(int soundBufferIndex, unsigned int
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    BC_MAIN("ae:wait:L478");
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+    BC_MAIN("ae:held:L478");
 
     if (!soundBuffer->active) {
         return false;
@@ -500,7 +523,9 @@ bool audioEngineSoundBufferLock(int soundBufferIndex, unsigned int writePos, uns
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    BC_MAIN("ae:wait:L504");
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+    BC_MAIN("ae:held:L504");
 
     if (!soundBuffer->active) {
         return false;
@@ -561,7 +586,9 @@ bool audioEngineSoundBufferUnlock(int soundBufferIndex, void* audioPtr1, unsigne
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    BC_MAIN("ae:wait:L565");
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+    BC_MAIN("ae:held:L565");
 
     if (!soundBuffer->active) {
         return false;
@@ -583,7 +610,9 @@ bool audioEngineSoundBufferGetStatus(int soundBufferIndex, unsigned int* statusP
     }
 
     AudioEngineSoundBuffer* soundBuffer = &(gAudioEngineSoundBuffers[soundBufferIndex]);
+    BC_MAIN("ae:wait:L587");
     std::lock_guard<std::recursive_mutex> lock(soundBuffer->mutex);
+    BC_MAIN("ae:held:L587");
 
     if (!soundBuffer->active) {
         return false;

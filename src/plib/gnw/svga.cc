@@ -1,9 +1,12 @@
 #include "plib/gnw/svga.h"
 
+#include "plib/gnw/bcdebug.h" // TEMP-HANG-DEBUG
 #include "plib/gnw/gnw.h"
 #include "plib/gnw/grbuf.h"
 #include "plib/gnw/mouse.h"
 #include "plib/gnw/winmain.h"
+
+#include <algorithm>
 
 #ifdef NXDK
 #include <hal/video.h>
@@ -17,11 +20,34 @@ static bool createRenderer(int width, int height);
 static void destroyRenderer();
 
 #ifdef NXDK
-static bool palette_changed = false;
-static void* texture_pixels = nullptr;
-static int texture_pitch = 0;
-static bool texture_locked = false;
-static Uint32* palette_32bit = nullptr;
+// Bounding box of gSdlSurface changed since the last upload to gSdlTexture.
+static SDL_Rect dirty_rect;
+static bool dirty = false;
+#endif
+
+// TEMP-HANG-DEBUG
+volatile const char* g_bc_main = "init";
+volatile const char* g_bc_audio = "init";
+volatile unsigned g_bc_loops = 0;
+#ifdef NXDK
+#include <pbkit/pbkit.h>
+extern "C" volatile int xgu_dbg_stage;
+static DWORD WINAPI bc_watchdog(LPVOID)
+{
+    unsigned last = 0;
+    for (;;) {
+        Sleep(1000);
+        unsigned loops = g_bc_loops;
+        DbgPrint("HANGDBG t=%u loops=%u%s main=%s audio=%s xgu=%d vbl=%lu pcrtc=%08lx bb=%08lx\n", (unsigned)SDL_GetTicks(), loops - last,
+            loops == last ? " STALLED" : "", (const char*)g_bc_main, (const char*)g_bc_audio, xgu_dbg_stage,
+            (unsigned long)pb_get_vbl_counter(), (unsigned long)(VIDEOREG(0x00600800) & 0x03FFFFFF), (unsigned long)((uint32_t)pb_back_buffer() & 0x03FFFFFF));
+        last = loops;
+    }
+    return 0;
+}
+void bc_start_watchdog() { CreateThread(NULL, 16384, bc_watchdog, NULL, 0, NULL); }
+#else
+void bc_start_watchdog() { }
 #endif
 
 // screen rect
@@ -40,83 +66,41 @@ SDL_Surface* gSdlTextureSurface = NULL;
 FpsLimiter sharedFpsLimiter;
 
 #ifdef NXDK
-static void rebuildPalette32()
+void svgaMarkDirty(const SDL_Rect* rect)
 {
-    if (!palette_32bit) {
-        palette_32bit = new Uint32[256];
-    }
-    SDL_Color* colors = SDL_GetSurfacePalette(gSdlSurface)->colors;
-    for (int i = 0; i < 256; i++) {
-        palette_32bit[i] = (colors[i].a << 24) | (colors[i].r << 16) | (colors[i].g << 8) | colors[i].b;
-    }
-}
-
-// 8-to-32 bit palette conversion, unrolled 8 pixels per iteration.
-static void convert_8to32_unrolled(const Uint8* src, Uint32* dst, int width, int height,
-                                   int src_pitch, int dst_pitch)
-{
-    dst_pitch /= sizeof(Uint32);
-    for (int y = 0; y < height; y++) {
-        const Uint8* src_row = src + y * src_pitch;
-        Uint32* dst_row = dst + y * dst_pitch;
-        int x = 0;
-        for (; x <= width - 8; x += 8) {
-            dst_row[x]     = palette_32bit[src_row[x]];
-            dst_row[x + 1] = palette_32bit[src_row[x + 1]];
-            dst_row[x + 2] = palette_32bit[src_row[x + 2]];
-            dst_row[x + 3] = palette_32bit[src_row[x + 3]];
-            dst_row[x + 4] = palette_32bit[src_row[x + 4]];
-            dst_row[x + 5] = palette_32bit[src_row[x + 5]];
-            dst_row[x + 6] = palette_32bit[src_row[x + 6]];
-            dst_row[x + 7] = palette_32bit[src_row[x + 7]];
-        }
-        for (; x < width; x++) {
-            dst_row[x] = palette_32bit[src_row[x]];
-        }
-    }
-}
-
-static void convert_8to32(const Uint8* src, Uint32* dst, int width, int height,
-                           int src_pitch, int dst_pitch)
-{
-    dst_pitch /= sizeof(Uint32);
-    for (int y = 0; y < height; y++) {
-        const Uint8* src_row = src + y * src_pitch;
-        Uint32* dst_row = dst + y * dst_pitch;
-        for (int x = 0; x < width; x++) {
-            dst_row[x] = palette_32bit[src_row[x]];
-        }
-    }
-}
-
-// Converts and blits directly into the locked texture, bypassing SDL_BlitSurface
-// Xbox has a unified memory architecture so we can avoid some redundant memory copies
-static void GNW95_ShowRect_Xbox(unsigned char* src, unsigned int srcPitch,
-                                unsigned int a3, unsigned int srcX, unsigned int srcY,
-                                unsigned int srcWidth, unsigned int srcHeight,
-                                unsigned int destX, unsigned int destY)
-{
-    if (texture_locked && texture_pixels) {
-        Uint32* dst_pixels = static_cast<Uint32*>(texture_pixels);
-        Uint32* dst_ptr = dst_pixels + destY * (texture_pitch / sizeof(Uint32)) + destX;
-        const Uint8* src_ptr = src + srcY * srcPitch + srcX;
-
-        // Use unrolled path when destination is 16-byte aligned and width is a multiple of 8.
-        if (((uintptr_t)dst_ptr & 15) == 0 && (srcWidth % 8) == 0) {
-            convert_8to32_unrolled(src_ptr, dst_ptr, srcWidth, srcHeight, srcPitch, texture_pitch);
-        } else {
-            convert_8to32(src_ptr, dst_ptr, srcWidth, srcHeight, srcPitch, texture_pitch);
-        }
-
-        // Needed for the fullscreen palette fade effects
-        buf_to_buf(const_cast<unsigned char*>(src_ptr),
-                   static_cast<int>(srcWidth),
-                   static_cast<int>(srcHeight),
-                   static_cast<int>(srcPitch),
-                   static_cast<unsigned char*>(gSdlSurface->pixels) + gSdlSurface->pitch * destY + destX,
-                   gSdlSurface->pitch);
+    if (rect->w <= 0 || rect->h <= 0) {
         return;
     }
+
+    if (dirty) {
+        SDL_GetRectUnion(&dirty_rect, rect, &dirty_rect);
+    } else {
+        dirty_rect = *rect;
+        dirty = true;
+    }
+}
+
+// Uploads the changed part of the 8-bit screen surface to the paletted
+// texture. The GPU does the palette lookup, so palette changes (color cycling,
+// fades) cost nothing here.
+static void uploadDirtyRect()
+{
+    if (!dirty) {
+        return;
+    }
+    dirty = false;
+
+    // The driver swizzles 8x4 pixel blocks fastest, so grow the rect to that
+    // alignment. The surface is the source, so the extra pixels are valid.
+    int x0 = dirty_rect.x & ~7;
+    int y0 = dirty_rect.y & ~3;
+    int x1 = std::min((dirty_rect.x + dirty_rect.w + 7) & ~7, gSdlSurface->w);
+    int y1 = std::min((dirty_rect.y + dirty_rect.h + 3) & ~3, gSdlSurface->h);
+
+    SDL_Rect rect = { x0, y0, x1 - x0, y1 - y0 };
+    SDL_UpdateTexture(gSdlTexture, &rect,
+        static_cast<unsigned char*>(gSdlSurface->pixels) + gSdlSurface->pitch * y0 + x0,
+        gSdlSurface->pitch);
 }
 #endif
 
@@ -137,12 +121,6 @@ void GNW95_SetPaletteEntries(unsigned char* palette, int start, int count)
         }
 
         SDL_SetPaletteColors(surfacePalette, colors, start, count);
-#ifdef NXDK
-        if (palette_32bit) {
-            rebuildPalette32();
-        }
-        palette_changed = true;
-#endif
     }
 }
 
@@ -161,12 +139,6 @@ void GNW95_SetPalette(unsigned char* palette)
         }
 
         SDL_SetPaletteColors(surfacePalette, colors, 0, 256);
-#ifdef NXDK
-        if (palette_32bit) {
-            rebuildPalette32();
-        }
-        palette_changed = true;
-#endif
     }
 }
 
@@ -175,13 +147,15 @@ void GNW95_ShowRect(unsigned char* src, unsigned int srcPitch, unsigned int a3,
                     unsigned int srcX, unsigned int srcY, unsigned int srcWidth,
                     unsigned int srcHeight, unsigned int destX, unsigned int destY)
 {
-#ifdef NXDK
-    GNW95_ShowRect_Xbox(src, srcPitch, a3, srcX, srcY, srcWidth, srcHeight, destX, destY);
-#else
     buf_to_buf(src + srcPitch * srcY + srcX, srcWidth, srcHeight, srcPitch,
                (unsigned char*)gSdlSurface->pixels + gSdlSurface->pitch * destY + destX,
                gSdlSurface->pitch);
 
+#ifdef NXDK
+    SDL_Rect rect = { static_cast<int>(destX), static_cast<int>(destY),
+        static_cast<int>(srcWidth), static_cast<int>(srcHeight) };
+    svgaMarkDirty(&rect);
+#else
     SDL_Rect srcRect;
     srcRect.x = destX;
     srcRect.y = destY;
@@ -285,6 +259,22 @@ bool svga_init(VideoOptions* video_options)
 
     SDL_SetPaletteColors(surfacePalette, colors, 0, 256);
 
+#ifdef NXDK
+    // Share the surface's palette, so SDL re-uploads it to the GPU whenever
+    // the game changes it.
+    if (!SDL_SetTexturePalette(gSdlTexture, surfacePalette)) {
+        SDL_DestroySurface(gSdlSurface);
+        gSdlSurface = NULL;
+        destroyRenderer();
+        SDL_DestroyWindow(gSdlWindow);
+        gSdlWindow = NULL;
+        return false;
+    }
+
+    SDL_Rect screenRect = { 0, 0, gSdlSurface->w, gSdlSurface->h };
+    svgaMarkDirty(&screenRect);
+#endif
+
     scr_size.ulx = 0;
     scr_size.uly = 0;
     scr_size.lrx = video_options->width - 1;
@@ -294,22 +284,13 @@ bool svga_init(VideoOptions* video_options)
     scr_blit = GNW95_ShowRect;
     mouse_blit = GNW95_ShowRect;
 
-#ifdef NXDK
-    rebuildPalette32();
-#endif
+    bc_start_watchdog(); // TEMP-HANG-DEBUG
 
     return true;
 }
 
 void svga_exit()
 {
-#ifdef NXDK
-    if (palette_32bit) {
-        delete[] palette_32bit;
-        palette_32bit = nullptr;
-    }
-#endif
-
     destroyRenderer();
 
     if (gSdlWindow != NULL) {
@@ -347,13 +328,12 @@ static bool createRenderer(int width, int height)
     }
 
 #ifdef NXDK
-    gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_ARGB8888,
+    // An 8-bit paletted texture: the GPU does the palette lookup. The palette
+    // is attached in svga_init once the screen surface exists.
+    gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_INDEX8,
                                     SDL_TEXTUREACCESS_STREAMING, width, height);
-    if (gSdlTexture) {
-        texture_locked = SDL_LockTexture(gSdlTexture, NULL, &texture_pixels, &texture_pitch);
-        if (texture_locked) {
-            debugPrint("Direct texture access enabled (pitch: %d)\n", texture_pitch);
-        }
+    if (gSdlTexture != NULL) {
+        SDL_SetTextureBlendMode(gSdlTexture, SDL_BLENDMODE_NONE);
     }
 #else
     gSdlTexture = SDL_CreateTexture(gSdlRenderer, SDL_PIXELFORMAT_XRGB8888,
@@ -379,14 +359,6 @@ static bool createRenderer(int width, int height)
 
 static void destroyRenderer()
 {
-#ifdef NXDK
-    if (texture_locked && gSdlTexture) {
-        SDL_UnlockTexture(gSdlTexture);
-        texture_locked = false;
-        texture_pixels = nullptr;
-    }
-#endif
-
     if (gSdlTextureSurface != NULL) {
         SDL_DestroySurface(gSdlTextureSurface);
         gSdlTextureSurface = NULL;
@@ -405,6 +377,15 @@ static void destroyRenderer()
 
 void handleWindowSizeChanged()
 {
+#ifdef NXDK
+    // The window is the whole screen and the video mode is only chosen at
+    // launch, so its size never really changes. SDL still sends a
+    // PIXEL_SIZE_CHANGED (1280x720 -> 1280x720) shortly after startup when it
+    // syncs the window with the driver. Tearing down and recreating the
+    // renderer in response left the screen black at 720p, so don't.
+    return;
+#endif
+
     destroyRenderer();
     createRenderer(screenGetWidth(), screenGetHeight());
 }
@@ -412,58 +393,19 @@ void handleWindowSizeChanged()
 void renderPresent()
 {
 #ifdef NXDK
-    if (texture_locked) {
-        if (palette_changed && texture_pixels) {
-            // Palette changed mid-frame; reconvert the entire 8-bit surface.
-            // Needed for fullscreen palette fade effects like the main menu
-            convert_8to32_unrolled(static_cast<const Uint8*>(gSdlSurface->pixels),
-                                   static_cast<Uint32*>(texture_pixels),
-                                   gSdlSurface->w, gSdlSurface->h,
-                                   gSdlSurface->pitch, texture_pitch);
-            palette_changed = false;
-        }
-        SDL_UnlockTexture(gSdlTexture);
-        texture_locked = false;
-        texture_locked = SDL_LockTexture(gSdlTexture, NULL, &texture_pixels, &texture_pitch);
-    }
+    BC_MAIN("rp:upload");
+    uploadDirtyRect();
 #else
     SDL_UpdateTexture(gSdlTexture, NULL, gSdlTextureSurface->pixels, gSdlTextureSurface->pitch);
 #endif
 
+    BC_MAIN("rp:clear");
     SDL_RenderClear(gSdlRenderer);
+    BC_MAIN("rp:texture");
     SDL_RenderTexture(gSdlRenderer, gSdlTexture, NULL, NULL);
+    BC_MAIN("rp:present");
     SDL_RenderPresent(gSdlRenderer);
+    BC_MAIN("rp:done");
 }
-
-#ifdef NXDK
-// Temporarily unlock the texture before movie frame blitting via SDL_BlitSurface.
-void movieFrameStart()
-{
-    if (texture_locked && gSdlTexture) {
-        SDL_UnlockTexture(gSdlTexture);
-        texture_locked = false;
-    }
-}
-
-void movieFrameEnd()
-{
-    if (!texture_locked && gSdlTexture) {
-        texture_locked = SDL_LockTexture(gSdlTexture, NULL, &texture_pixels, &texture_pitch);
-    }
-}
-
-// Converts gSdlSurface (8-bit) into the locked texture.
-// Called by movie playback after blitting a decoded frame into gSdlSurface,
-void svgaConvertSurfaceToTexture()
-{
-    if (texture_pixels && gSdlSurface) {
-        convert_8to32_unrolled(
-            static_cast<const Uint8*>(gSdlSurface->pixels),
-            static_cast<Uint32*>(texture_pixels),
-            gSdlSurface->w, gSdlSurface->h,
-            gSdlSurface->pitch, texture_pitch);
-    }
-}
-#endif
 
 } // namespace fallout

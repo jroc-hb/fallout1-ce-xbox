@@ -31,9 +31,8 @@ void handleWindowSizeChanged();
 void renderPresent();
 
 #ifdef NXDK
-void movieFrameStart();
-void movieFrameEnd();
-void svgaConvertSurfaceToTexture();
+// Marks a rect of gSdlSurface as changed, so the next renderPresent uploads it.
+void svgaMarkDirty(const SDL_Rect* rect);
 #endif
 
 } // namespace fallout

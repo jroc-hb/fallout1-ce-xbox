@@ -317,19 +317,15 @@ static void movie_MVE_ShowFrame(SDL_Surface* surface, int srcWidth, int srcHeigh
     SDL_BlitSurface(surface, &srcRect, gSdlSurface, &destRect);
 
 #ifdef NXDK
-    // gSdlTextureSurface is not allocated on Xbox; convert gSdlSurface directly
-    // into the locked texture, then unlock it so renderPresent can submit the frame.
-    svgaConvertSurfaceToTexture();
-    movieFrameStart();
+    // gSdlTextureSurface is not allocated on Xbox; gSdlSurface is uploaded to
+    // the paletted texture directly. SDL_BlitSurface clipped destRect to what
+    // it actually wrote.
+    svgaMarkDirty(&destRect);
 #else
     SDL_BlitSurface(gSdlSurface, NULL, gSdlTextureSurface, NULL);
 #endif
 
     renderPresent();
-
-#ifdef NXDK
-    movieFrameEnd();
-#endif
 }
 
 // 0x478710

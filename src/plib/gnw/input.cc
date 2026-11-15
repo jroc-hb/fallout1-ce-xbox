@@ -7,6 +7,7 @@
 #include "platform_compat.h"
 #include "plib/color/color.h"
 #include "plib/gnw/button.h"
+#include "plib/gnw/bcdebug.h" // TEMP-HANG-DEBUG
 #include "plib/gnw/dxinput.h"
 #include "plib/gnw/gamepad.hpp"
 #include "plib/gnw/gnw.h"
@@ -185,7 +186,10 @@ int get_input()
 {
     int v3;
 
+    g_bc_loops++; // TEMP-HANG-DEBUG
+    BC_MAIN("gi:process_message");
     GNW95_process_message();
+    BC_MAIN("gi:process_bk");
 
     if (!GNW95_isActive) {
         GNW95_lost_focus();
@@ -193,7 +197,9 @@ int get_input()
 
     process_bk();
 
+    BC_MAIN("gi:buffer");
     v3 = get_input_buffer();
+    BC_MAIN("gi:after");
     if (v3 == -1 && mouse_get_buttons() & 0x33) {
         mouse_get_position(&input_mx, &input_my);
         return -2;

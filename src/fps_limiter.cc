@@ -1,4 +1,5 @@
 #include "fps_limiter.h"
+#include "plib/gnw/bcdebug.h" // TEMP-HANG-DEBUG
 
 #include <SDL3/SDL.h>
 
@@ -19,7 +20,9 @@ void FpsLimiter::throttle() const
 {
     Uint64 elapsed = SDL_GetTicks() - _ticks;
     if (1000 / _fps > elapsed) {
+        BC_MAIN("fps:delay");
         SDL_Delay(static_cast<Uint32>(1000 / _fps - elapsed));
+        BC_MAIN("fps:done");
     }
 }
 
