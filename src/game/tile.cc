@@ -54,6 +54,9 @@ typedef struct UpsideDownTriangle {
 static void refresh_mapper(Rect* rect, int elevation);
 static void refresh_game(Rect* rect, int elevation);
 static bool tile_on_edge(int tile);
+static int tile_step(int stepX, int stepY);
+static bool tile_can_step(int stepX, int stepY);
+static int tile_scroll_fine_axis(int* fine, int stepSize, int stepX, int stepY, int delta);
 static void roof_fill_on(int x, int y, int elevation);
 static void roof_fill_off(int x, int y, int elevation);
 static void roof_draw(int fid, int x, int y, Rect* rect, int light);
@@ -193,6 +196,12 @@ static unsigned char tile_grid[32 * 16];
 
 // 0x668E04
 static int tile_offy;
+
+// Camera offset in screen pixels past the center tile's scroll position, for
+// smooth scrolling. Kept within one scroll step (0..31 across, 0..23 down) and
+// applied to every screen coordinate through tile_offx/tile_offy.
+static int tile_fine_x = 0;
+static int tile_fine_y = 0;
 
 // 0x668E08
 static int tile_offx;
@@ -537,9 +546,9 @@ int tile_set_center(int tile, int flags)
     }
 
     tile_y = new_tile_y;
-    tile_offx = (buf_width - 32) / 2;
+    tile_offx = (buf_width - 32) / 2 - tile_fine_x;
     tile_x = new_tile_x;
-    tile_offy = (buf_length - 16) / 2;
+    tile_offy = (buf_length - 16) / 2 - tile_fine_y;
 
     if (tile_x & 1) {
         tile_x -= 1;
@@ -567,6 +576,87 @@ int tile_set_center(int tile, int flags)
     }
 
     return 0;
+}
+
+// Moves the camera one scroll step (32 px across or 24 px down, like
+// map_scroll). Returns 0 on success, or -1 if the step isn't allowed.
+static int tile_step(int stepX, int stepY)
+{
+    int x;
+    int y;
+    tile_coord(tile_center_tile, &x, &y, map_elevation);
+
+    int tile = tile_num(x + stepX * 32 + 16, y + stepY * 24 + 8, map_elevation);
+    if (tile == -1) {
+        return -1;
+    }
+
+    return tile_set_center(tile, 0);
+}
+
+// Checks whether the camera may take one scroll step, without moving it.
+static bool tile_can_step(int stepX, int stepY)
+{
+    int oldCenterTile = tile_center_tile;
+    if (tile_step(stepX, stepY) != 0) {
+        return false;
+    }
+
+    tile_set_center(oldCenterTile, TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS);
+    return true;
+}
+
+// Moves the camera |delta| pixels along one axis, taking whole scroll steps
+// as the offset passes them. Stops where a scroll step is refused, and only
+// shows part of the next step if that step is allowed, so smooth scrolling
+// reaches exactly the same area as stepped scrolling. Returns the distance
+// actually moved.
+static int tile_scroll_fine_axis(int* fine, int stepSize, int stepX, int stepY, int delta)
+{
+    // Positions are relative to the current center tile's scroll position.
+    int start = *fine;
+    int target = start + delta;
+    int origin = 0;
+
+    while (target - origin >= stepSize) {
+        if (tile_step(stepX, stepY) != 0) {
+            target = origin;
+            break;
+        }
+        origin += stepSize;
+    }
+
+    while (target - origin < 0) {
+        if (tile_step(-stepX, -stepY) != 0) {
+            target = origin;
+            break;
+        }
+        origin -= stepSize;
+    }
+
+    if (target - origin > 0 && !tile_can_step(stepX, stepY)) {
+        target = origin;
+    }
+
+    *fine = target - origin;
+    return target - start;
+}
+
+// Moves the camera by up to *dx, *dy screen pixels (positive is right/down).
+// On return *dx, *dy hold the distance actually moved, by which the caller
+// must shift the visible map. Does not redraw anything.
+void tile_scroll_fine(int* dx, int* dy)
+{
+    if (*dx != 0) {
+        *dx = tile_scroll_fine_axis(&tile_fine_x, 32, 1, 0, *dx);
+    }
+
+    if (*dy != 0) {
+        *dy = tile_scroll_fine_axis(&tile_fine_y, 24, 0, 1, *dy);
+    }
+
+    // Apply the new offset to the screen coordinates.
+    tile_set_center(tile_center_tile, TILE_SET_CENTER_FLAG_IGNORE_SCROLL_RESTRICTIONS);
 }
 
 // 0x49E138

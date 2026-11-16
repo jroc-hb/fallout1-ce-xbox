@@ -108,6 +108,8 @@ char* map_get_description();
 char* map_get_description_idx(int map_index);
 int map_get_index_number();
 int map_scroll(int dx, int dy);
+int map_scroll_pixels(int dx, int dy);
+bool map_pixel_scrolling();
 char* map_file_path(char* name);
 void map_new_map();
 int map_load(char* fileName);

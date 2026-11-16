@@ -553,6 +553,8 @@ static int obj_load_func(DB_FILE* stream)
                             return -1;
                         }
 
+                        inventoryItem->item->renderBoundsValid = false;
+
                         if (obj_read_obj(inventoryItem->item, stream) != 0) {
                             debug_printf("Error loading inventory\n");
                             return -1;
@@ -4629,6 +4631,34 @@ static void obj_render_object(Object* object, Rect* rect, int light)
         return;
     }
 
+    // CE: Skip objects that can't touch |rect| using the bounds from their
+    // last draw, if their art state hasn't changed since. A redraw of a thin
+    // strip (smooth scrolling) visits every object within 320x240 px of it,
+    // and locking the art of each one dominated the cost.
+    if (object->tile != -1
+        && object->renderBoundsValid
+        && object->renderBoundsFid == object->fid
+        && object->renderBoundsFrame == object->frame
+        && object->renderBoundsRotation == object->rotation
+        && object->renderBoundsX == object->x
+        && object->renderBoundsY == object->y) {
+        int tileScreenX;
+        int tileScreenY;
+        tile_coord(object->tile, &tileScreenX, &tileScreenY, object->elevation);
+
+        int left = tileScreenX + object->renderBoundsLeft;
+        int top = tileScreenY + object->renderBoundsTop;
+        if (left > rect->lrx
+            || top > rect->lry
+            || tileScreenX + object->renderBoundsRight < rect->ulx
+            || tileScreenY + object->renderBoundsBottom < rect->uly) {
+            // Keep the side effect of the full path below.
+            object->sx = left;
+            object->sy = top;
+            return;
+        }
+    }
+
     CacheEntry* cacheEntry;
     Art* art = art_ptr_lock(object->fid, &cacheEntry);
     if (art == NULL) {
@@ -4645,11 +4675,12 @@ static void obj_render_object(Object* object, Rect* rect, int light)
         objectRect.lrx = object->sx + frameWidth - 1;
         objectRect.lry = object->sy + frameHeight - 1;
     } else {
-        int objectScreenX;
-        int objectScreenY;
-        tile_coord(object->tile, &objectScreenX, &objectScreenY, object->elevation);
-        objectScreenX += 16;
-        objectScreenY += 8;
+        int tileScreenX;
+        int tileScreenY;
+        tile_coord(object->tile, &tileScreenX, &tileScreenY, object->elevation);
+
+        int objectScreenX = tileScreenX + 16;
+        int objectScreenY = tileScreenY + 8;
 
         objectScreenX += art->xOffsets[object->rotation];
         objectScreenY += art->yOffsets[object->rotation];
@@ -4664,6 +4695,17 @@ static void obj_render_object(Object* object, Rect* rect, int light)
 
         object->sx = objectRect.ulx;
         object->sy = objectRect.uly;
+
+        object->renderBoundsValid = true;
+        object->renderBoundsFid = object->fid;
+        object->renderBoundsFrame = object->frame;
+        object->renderBoundsRotation = object->rotation;
+        object->renderBoundsX = object->x;
+        object->renderBoundsY = object->y;
+        object->renderBoundsLeft = objectRect.ulx - tileScreenX;
+        object->renderBoundsTop = objectRect.uly - tileScreenY;
+        object->renderBoundsRight = objectRect.lrx - tileScreenX;
+        object->renderBoundsBottom = objectRect.lry - tileScreenY;
     }
 
     if (rect_inside_bound(&objectRect, rect, &objectRect) != 0) {

@@ -13,9 +13,19 @@ NXDK and the hardware-accelerated nxdk-sdl3 port. The current work branch is `SD
     entered for the vblank, so a vblank landing while a GPU interrupt's DPC was pending retired the
     frame without showing it (the old 2-4 s "stuck in PCRTC loop" stalls). **This build no longer
     needs it**: nxdk-sdl3's renderer now flips by itself and never calls `pb_finished()` (see Video).
-  - nxdk libraries are prebuilt. After switching nxdk branches, rebuild pbkit with
-    `make NXDK_ONLY=y NXDK_DIR=$HOME/xbox/nxdk $HOME/xbox/nxdk/lib/libpbkit.lib` (in `~/xbox/nxdk`,
-    with clang 21 on PATH), then delete `build/fallout-ce.exe` so the game relinks.
+  - nxdk libraries are prebuilt. **nxdk's Makefile sets no optimization level, so its libraries
+    build at `-O0` unless you pass `CFLAGS=-O2 CXXFLAGS=-O2`.** At `-O0`, pdclib's `memcpy`/`memmove`/
+    `memset` ran ~15 instructions per byte and made every blit and scroll ~3x slower. The libraries
+    the game links are built at `-O2` (2026-11-16); keep it that way when rebuilding any of them.
+    From `~/xbox/nxdk` (with clang 21 on PATH and `eval "$(~/xbox/nxdk/bin/activate -s)"`):
+    `N=$HOME/xbox/nxdk; make NXDK_ONLY=y NXDK_DIR=$N CFLAGS=-O2 CXXFLAGS=-O2 $N/lib/libpdclib.lib
+    $N/lib/libwinapi.lib $N/lib/libxboxrt.lib $N/lib/libnxdk_hal.lib $N/lib/libnxdk.lib
+    $N/lib/nxdk_usb.lib $N/lib/libpbkit.lib $N/lib/libnxdk_automount_d.lib`. Make doesn't track
+    flags, so delete the libraries' `.obj` files first when changing them. Then delete
+    `build/fallout-ce.exe` so the game relinks.
+  - The pdclib submodule (`lib/pdclib`) is on local branch **`fast-string-copies`**: `memcpy`,
+    `memmove` and `memset` copy 4 bytes at a time (`rep movsl`/`stosl`). With `-O2` that cut a
+    0.8 MB `memmove` from 3.7 ms to 0.3 ms in XEMU.
 - nxdk-sdl3: `~/xbox/nxdk-sdl3` (vendors SDL under `SDL/`, with the Xbox backends in `nxdk_glue/`)
   - It's a checkout of `Ryzee119/nxdk-sdl3`. **The build uses the local branch `master-nxaudio-fallout`**:
     upstream `master` with upstream's unmerged `nxaudio` branch merged in, so audio goes through
@@ -183,7 +193,22 @@ SDL-created threads on nxdk-sdl3 get very small stacks (about 4 KB), so keep lar
 - Because every present costs a vblank, code that presents in a tight loop gets slow. Map loading
   registers `gameMouseRefreshImmediately` as the `db` read callback (every 8 KB), which presented on
   each call and capped loading at ~0.5 MB/s (about 20 s to load a save). On NXDK it now presents
-  at most every 33 ms, which cut that load to about 2.5 s in XEMU.
+  at most every 100 ms, which cut that load to about 2.4 s in XEMU. For the same reason
+  `palette_init` no longer times a 60-step test fade on NXDK (always 1 s); it uses 42 steps.
+
+**Load and boot times (measured in XEMU, 2026-11-15).**
+- Save load (Cathedral Entrance slot): 2.4 s, of which about 1 s is raw stdio I/O for 5 MB.
+  `game_init`: 5.7 s, of which about 1.2 s is I/O for 1.8 MB. The rest is USB enumeration, the
+  video mode set (`svga_init`, ~1 s) and game data setup.
+- nxdk's stdio has a 1 KB buffer, every `fseek` drops it, and `db.cc` seeks before every read of a
+  file stored uncompressed in a `.DAT`. Skipping redundant seeks and/or a bigger `setvbuf` buffer
+  were measured and **didn't help**: reads are scattered, so time scales with bytes read, and a
+  64 KB buffer made the save load 3x slower. Don't retry without measuring on real hardware.
+- The nxdk-sdl3 joystick init waited for USB enumeration with 500 iterations of `SDL_Delay(1)`,
+  which took ~1.5 s in XEMU. It is now time-based (500 ms). USB enumeration itself (OHCI reset,
+  port reset/debounce per device) still takes ~1.5 s and is needed for pads present at boot.
+- To profile init without code changes, pipe XEMU's stdout through a timestamper (a few lines of
+  Python stamping each line with host time) and look for the largest gaps between log lines.
 - The game renders at the native mode size, so frames are shown 1:1. The texture uses
   `SDL_SCALEMODE_NEAREST`, which the xgu renderer honours, so any scaling would also be unfiltered.
 - Shortly after the main menu appears, SDL sends a spurious `SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED`
@@ -192,6 +217,32 @@ SDL-created threads on nxdk-sdl3 get very small stacks (about 4 KB), so keep lar
   mid-session.
 - `debugPrint` (nxdk `hal/debug.h`) draws on screen, not to serial. Use `DbgPrint` or `debug_printf`
   for the serial log.
+
+**Smooth right-stick panning.** The right stick pans the map pixel by pixel instead of in the
+engine's 32x24 px scroll steps.
+- `tile.cc` keeps a sub-step camera offset (`tile_fine_x`/`tile_fine_y`, 0..31 and 0..23) that
+  `tile_set_center` folds into `tile_offx`/`tile_offy`. Every screen<->map conversion (objects,
+  floor/roof, text, mouse picking, bounds) goes through those, so they all follow automatically.
+- `tile_scroll_fine` moves the camera N pixels, taking whole scroll steps as the offset passes them
+  (net screen shift of a step is zero). It only shows part of the next step if `tile_set_center`
+  would allow that step, so it reaches exactly the area stepped scrolling can.
+- `map_scroll_pixels` (map.cc) shifts the map buffer by exactly that many pixels and redraws the
+  strips that come into view, sharing `map_shift_display` with `map_scroll`. It isn't limited to
+  one call per 33 ms like `map_scroll`.
+- `ProcessRightStick` (gamepad.cc) turns stick deflection into a pixel velocity, keeping the old
+  speed: one 32x24 step per `gRightStickInternalDivisor` ms at full deflection.
+- Cost in XEMU (2026-11-16, -O2 nxdk + fast pdclib copies): 2.5-4.5 ms average (up to ~9 ms) per
+  frame at 720p, mostly the strip redraw. (480p measured ~5 ms before those library fixes.) 720p holds 56-60 fps while panning, so an occasional frame still drops.
+- The hex cursor is hidden while panning (`map_pixel_scrolling()`, checked in `gmouse_bk_process`)
+  and comes back 100 ms after the map stops. It can only sit on whole hexes, so showing it while
+  the map glides under a still mouse made it slide and jump back a hex (a ghosting effect).
+- Strip redraws were dominated by `obj_render_pre_roof`: it visits every object within 320x240 px
+  of the strip and `obj_render_object` locked each one's art just to find it doesn't overlap.
+  `Object` now caches its last drawn bounds relative to its tile (`renderBounds*`, keyed on fid,
+  frame, rotation and x/y offset, runtime only) for an early reject. That cut object drawing
+  per strip from ~1.5 ms to ~0.2 ms at 480p. Any new code that allocates an `Object` without
+  zeroing it must set `renderBoundsValid = false`.
+- XEMU's default keyboard map puts the right stick on I/J/K/L, which is how it was tested.
 
 **Gamepad mapping must be registered before `SDL_INIT_JOYSTICK`.** The Original Xbox pad needs the
 game's `default` mapping (`GamepadRegisterDefaultMapping` in `gamepad.cc`). The mapping is set via

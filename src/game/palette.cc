@@ -31,6 +31,14 @@ void palette_init()
     memset(white_palette, 63, 256 * 3);
     memcpy(current_palette, cmap, 256 * 3);
 
+#ifdef NXDK
+    // Each fade step is one present, and on Xbox every present waits for a
+    // 60 Hz vblank, so the timing run below always gives the same answer and
+    // just costs a second of boot time. 42 steps is ~700 ms at 60 Hz.
+    fade_steps = 42;
+    return;
+#endif
+
     unsigned int tick = get_time();
     if (gsound_background_is_enabled() || gsound_speech_is_enabled()) {
         colorSetFadeBkFunc(soundUpdate);

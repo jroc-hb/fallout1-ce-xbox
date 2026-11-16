@@ -622,6 +622,12 @@ void gmouse_bk_process()
         return;
     }
 
+    // Keep the hex cursor hidden while the right stick pans the map (see
+    // map_pixel_scrolling).
+    if (map_pixel_scrolling()) {
+        return;
+    }
+
     // NOTE: Strange set of conditions and jumps. Not sure about this one.
     switch (gmouse_current_cursor) {
     case MOUSE_CURSOR_NONE:
@@ -2400,9 +2406,9 @@ void gameMouseRefreshImmediately()
 #ifdef NXDK
     // This runs after every 8KB read while a map loads. On Xbox each present
     // waits for vblank, so presenting every time caps loading at ~0.5MB/s.
-    // 30 presents a second is plenty to keep the wait cursor animated.
+    // 10 presents a second is plenty to keep the wait cursor animated.
     static unsigned int lastPresentTime = 0;
-    if (elapsed_time(lastPresentTime) < 33) {
+    if (elapsed_time(lastPresentTime) < 100) {
         return;
     }
     lastPresentTime = get_time();

@@ -283,6 +283,21 @@ typedef struct Object {
     int sid; // obj_sid
     Object* owner;
     int field_80;
+
+    // CE: Screen bounds from the last draw, relative to the tile's screen
+    // position, and the art state they were computed for. Lets
+    // obj_render_object skip objects outside the area being redrawn without
+    // locking their art. Runtime only, never saved.
+    bool renderBoundsValid;
+    int renderBoundsFid;
+    int renderBoundsFrame;
+    int renderBoundsRotation;
+    int renderBoundsX;
+    int renderBoundsY;
+    int renderBoundsLeft;
+    int renderBoundsTop;
+    int renderBoundsRight;
+    int renderBoundsBottom;
 } Object;
 
 typedef struct ObjectListNode {

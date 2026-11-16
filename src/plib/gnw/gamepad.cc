@@ -24,9 +24,10 @@ namespace fallout {
 // Left stick default (40): maps to internal divisor 2.0. Linear input — stick
 //   deflection maps directly to cursor speed, uniform in all directions.
 //
-// Right stick default (40): maps to internal divisor 50.0.
-//   Accumulates stickValue * dt each frame; a scroll step fires when the
-//   accumulator crosses the divisor. At full deflection: ~20 tile-steps/sec.
+// Right stick default (40): maps to internal divisor 62.5.
+//   Pans the map smoothly at stickValue * (32 px per divisor ms) across and
+//   (24 px per divisor ms) down, i.e. one scroll step per divisor ms at full
+//   deflection: 16 steps/sec at the default.
 static int gLeftStickDeadzonePercent  = 20;
 static int gRightStickDeadzonePercent = 20;
 static int gLeftStickSensitivity      = 40;
@@ -173,62 +174,6 @@ void ReleaseChordKey()
         rightStickY = rightStickYUnscaled;
         ScaleJoystickAxes(&rightStickX, &rightStickY, rightDeadzone);
     }
-
-    struct RightStickAccumulator {
-        RightStickAccumulator()
-            : lastTc(SDL_GetTicks()), hiresDX(0.0f), hiresDY(0.0f)
-        {}
-
-        bool GetScrollDelta(int* outX, int* outY, float divisor)
-        {
-            const Uint64 tc = SDL_GetTicks();
-            const int dtc = static_cast<int>(tc - lastTc);
-            lastTc = tc;
-
-            hiresDX += rightStickX * dtc;
-            hiresDY += rightStickY * dtc;
-
-            static constexpr float kDiagThreshold = 0.3f;
-            const bool diagonalIntent = std::abs(rightStickX) > kDiagThreshold
-                                     && std::abs(rightStickY) > kDiagThreshold;
-
-            if (diagonalIntent) {
-                if (std::abs(hiresDX) >= divisor || std::abs(hiresDY) >= divisor) {
-                    *outX = (rightStickX > 0.0f) ? 1 : -1;
-                    *outY = (rightStickY > 0.0f) ? -1 : 1;
-                    hiresDX = 0.0f;
-                    hiresDY = 0.0f;
-                    return true;
-                }
-            } else {
-                if (std::abs(hiresDX) >= divisor) {
-                    *outX = (hiresDX > 0.0f) ? 1 : -1;
-                    *outY = 0;
-                    hiresDX = 0.0f;
-                    return true;
-                }
-                if (std::abs(hiresDY) >= divisor) {
-                    *outX = 0;
-                    *outY = (hiresDY > 0.0f) ? -1 : 1;
-                    hiresDY = 0.0f;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        void Clear()
-        {
-            lastTc  = SDL_GetTicks();
-            hiresDX = 0.0f;
-            hiresDY = 0.0f;
-        }
-
-        Uint64 lastTc;
-        float  hiresDX;
-        float  hiresDY;
-    };
 
     struct LeftStickAccumulator {
 
@@ -612,16 +557,34 @@ void ProcessLeftStick()
 
 void ProcessRightStick()
 {
-    static RightStickAccumulator acc;
+    // Fractional pixels carried over to the next frame.
+    static float remainderX = 0.0f;
+    static float remainderY = 0.0f;
+    static Uint64 lastTicks = 0;
+
+    const Uint64 now = SDL_GetTicksNS();
+    // Cap the step so a stall (loading, a dialog) doesn't make the map jump.
+    const float dt = std::min(static_cast<float>(now - lastTicks) / 1000000.0f, 50.0f);
+    lastTicks = now;
 
     if (rightStickX == 0.0f && rightStickY == 0.0f) {
-        acc.Clear();
+        remainderX = 0.0f;
+        remainderY = 0.0f;
         return;
     }
 
-    int dx = 0, dy = 0;
-    if (acc.GetScrollDelta(&dx, &dy, gRightStickInternalDivisor)) {
-        map_scroll(dx, dy);
+    // Same speed as the stepped scrolling this replaced: one 32x24 px scroll
+    // step per divisor ms at full deflection. Positive stick Y scrolls up, as
+    // before.
+    remainderX += rightStickX * dt * 32.0f / gRightStickInternalDivisor;
+    remainderY -= rightStickY * dt * 24.0f / gRightStickInternalDivisor;
+
+    const int dx = static_cast<int>(remainderX);
+    const int dy = static_cast<int>(remainderY);
+    if (dx != 0 || dy != 0) {
+        map_scroll_pixels(dx, dy);
+        remainderX -= dx;
+        remainderY -= dy;
     }
 }
 

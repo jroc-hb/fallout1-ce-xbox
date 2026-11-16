@@ -26,6 +26,7 @@ void tile_enable_refresh();
 void tile_refresh_rect(Rect* rect, int elevation);
 void tile_refresh_display();
 int tile_set_center(int tile, int flags);
+void tile_scroll_fine(int* dx, int* dy);
 void tile_toggle_roof(int a1);
 int tile_roof_visible();
 int tile_coord(int tile, int* x, int* y, int elevation);

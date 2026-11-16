@@ -220,6 +220,9 @@ static int map_data_elev_flags[ELEVATION_COUNT] = {
 // 0x505ADC
 static unsigned int map_last_scroll_time = 0;
 
+// Last time map_scroll_pixels moved the map.
+static unsigned int map_last_pixel_scroll_time = 0;
+
 // 0x505AE0
 static bool map_bk_enabled = false;
 
@@ -709,39 +712,10 @@ int map_get_index_number()
     return map_data.field_34;
 }
 
-// 0x474284
-int map_scroll(int dx, int dy)
+// Shifts the visible map by |screenDx|, |screenDy| pixels to follow a camera
+// move in that direction, and redraws the strips that come into view.
+static void map_shift_display(int screenDx, int screenDy)
 {
-    if (elapsed_time(map_last_scroll_time) < 33) {
-        return -2;
-    }
-
-    map_last_scroll_time = get_time();
-
-    int screenDx = dx * 32;
-    int screenDy = dy * 24;
-
-    if (screenDx == 0 && screenDy == 0) {
-        return -1;
-    }
-
-    gmouse_3d_off();
-
-    int centerScreenX;
-    int centerScreenY;
-    tile_coord(tile_center_tile, &centerScreenX, &centerScreenY, map_elevation);
-    centerScreenX += screenDx + 16;
-    centerScreenY += screenDy + 8;
-
-    int newCenterTile = tile_num(centerScreenX, centerScreenY, map_elevation);
-    if (newCenterTile == -1) {
-        return -1;
-    }
-
-    if (tile_set_center(newCenterTile, 0) == -1) {
-        return -1;
-    }
-
     Rect r1;
     rectCopy(&r1, &map_display_rect);
 
@@ -752,13 +726,14 @@ int map_scroll(int dx, int dy)
     int pitch = width;
     int height = scr_size.lry - scr_size.uly - 99;
 
-    if (screenDx != 0) {
-        width -= 32;
+    // Shifting further than the visible map leaves nothing to keep.
+    if (abs(screenDx) >= width || abs(screenDy) >= height) {
+        map_scroll_refresh(&map_display_rect);
+        return;
     }
 
-    if (screenDy != 0) {
-        height -= 24;
-    }
+    width -= abs(screenDx);
+    height -= abs(screenDy);
 
     if (screenDx < 0) {
         r2.lrx = r2.ulx - screenDx;
@@ -805,7 +780,70 @@ int map_scroll(int dx, int dy)
     if (screenDy != 0) {
         map_scroll_refresh(&r1);
     }
+}
 
+// 0x474284
+int map_scroll(int dx, int dy)
+{
+    if (elapsed_time(map_last_scroll_time) < 33) {
+        return -2;
+    }
+
+    map_last_scroll_time = get_time();
+
+    int screenDx = dx * 32;
+    int screenDy = dy * 24;
+
+    if (screenDx == 0 && screenDy == 0) {
+        return -1;
+    }
+
+    gmouse_3d_off();
+
+    int centerScreenX;
+    int centerScreenY;
+    tile_coord(tile_center_tile, &centerScreenX, &centerScreenY, map_elevation);
+    centerScreenX += screenDx + 16;
+    centerScreenY += screenDy + 8;
+
+    int newCenterTile = tile_num(centerScreenX, centerScreenY, map_elevation);
+    if (newCenterTile == -1) {
+        return -1;
+    }
+
+    if (tile_set_center(newCenterTile, 0) == -1) {
+        return -1;
+    }
+
+    map_shift_display(screenDx, screenDy);
+
+    win_draw(display_win);
+
+    return 0;
+}
+
+// Whether map_scroll_pixels moved the map in the last 100 ms. The hex cursor
+// stays hidden meanwhile: it can only sit on whole hexes, so while the map
+// glides under a still mouse it would keep jumping back a hex.
+bool map_pixel_scrolling()
+{
+    return elapsed_time(map_last_pixel_scroll_time) < 100;
+}
+
+// Smoothly scrolls the map by |dx|, |dy| screen pixels (positive is
+// right/down), within the area map_scroll could reach. Unlike map_scroll it
+// is not rate limited, so it can be called every frame.
+int map_scroll_pixels(int dx, int dy)
+{
+    tile_scroll_fine(&dx, &dy);
+    if (dx == 0 && dy == 0) {
+        return -1;
+    }
+
+    map_last_pixel_scroll_time = get_time();
+
+    gmouse_3d_off();
+    map_shift_display(dx, dy);
     win_draw(display_win);
 
     return 0;
