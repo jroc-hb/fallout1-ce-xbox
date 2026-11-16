@@ -2396,6 +2396,18 @@ void gmouse_remove_item_outline(Object* object)
 void gameMouseRefreshImmediately()
 {
     gmouse_bk_process();
+
+#ifdef NXDK
+    // This runs after every 8KB read while a map loads. On Xbox each present
+    // waits for vblank, so presenting every time caps loading at ~0.5MB/s.
+    // 30 presents a second is plenty to keep the wait cursor animated.
+    static unsigned int lastPresentTime = 0;
+    if (elapsed_time(lastPresentTime) < 33) {
+        return;
+    }
+    lastPresentTime = get_time();
+#endif
+
     renderPresent();
 }
 

@@ -18,6 +18,13 @@ void FpsLimiter::mark()
 
 void FpsLimiter::throttle() const
 {
+#ifdef NXDK
+    // On Xbox, SDL_RenderPresent already blocks until vblank, and every loop
+    // that throttles also presents. Sleeping here as well can push the next
+    // present past a vblank and drop the frame rate to 30fps.
+    return;
+#endif
+
     Uint64 elapsed = SDL_GetTicks() - _ticks;
     if (1000 / _fps > elapsed) {
         BC_MAIN("fps:delay");

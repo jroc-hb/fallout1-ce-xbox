@@ -177,7 +177,13 @@ SDL-created threads on nxdk-sdl3 get very small stacks (about 4 KB), so keep lar
   replaced pbkit's interrupt-driven `pb_finished()` flip queue, which under XEMU load (paletted
   re-uploads from color cycling) sometimes rendered into or showed the wrong buffer. An older frame
   then flashed for one frame (sprites "bouncing back"). It's synchronous with vblank: one frame
-  queued at most, so a frame taking longer than ~16 ms drops to 30 fps.
+  queued at most, so a frame taking longer than ~16 ms drops to 30 fps. Because present already
+  paces to vblank, `FpsLimiter::throttle()` is a no-op on NXDK (its extra 16 ms sleep could make a
+  present miss the next vblank). Every loop that throttles also presents each pass, so none spins.
+- Because every present costs a vblank, code that presents in a tight loop gets slow. Map loading
+  registers `gameMouseRefreshImmediately` as the `db` read callback (every 8 KB), which presented on
+  each call and capped loading at ~0.5 MB/s (about 20 s to load a save). On NXDK it now presents
+  at most every 33 ms, which cut that load to about 2.5 s in XEMU.
 - The game renders at the native mode size, so frames are shown 1:1. The texture uses
   `SDL_SCALEMODE_NEAREST`, which the xgu renderer honours, so any scaling would also be unfiltered.
 - Shortly after the main menu appears, SDL sends a spurious `SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED`
