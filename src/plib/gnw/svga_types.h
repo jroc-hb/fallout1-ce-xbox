@@ -19,6 +19,12 @@ typedef struct VideoOptions {
     int height;
     bool fullscreen;
     int scale;
+#ifdef NXDK
+    // XBOX OPTS display settings (f1_res.ini [XBOX]). width/height above are
+    // the video mode; svga_init replaces them with the size the game draws at.
+    int uiScale; // 0: 1x, 1: 1.33x, 2: 1.5x (720p only)
+    int safeArea; // black border on each edge, percent of the screen (0-8)
+#endif
 } VideoOptions;
 
 } // namespace fallout

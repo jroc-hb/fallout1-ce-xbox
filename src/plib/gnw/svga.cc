@@ -7,6 +7,7 @@
 #include "plib/gnw/winmain.h"
 
 #include <algorithm>
+#include <cmath>
 
 #ifdef NXDK
 #include <hal/video.h>
@@ -20,6 +21,59 @@ static bool createRenderer(int width, int height);
 static void destroyRenderer();
 
 #ifdef NXDK
+// Where the game's image goes in the video mode: centered, inside the safe
+// area, scaled up for the larger interface settings.
+static SDL_FRect gPresentRect;
+
+// Works out the size the game draws at (the screen size every game window and
+// the mouse use) for a video mode, from the XBOX OPTS settings:
+// - the safe area shrinks the usable part of the mode on every edge;
+// - the interface scale draws the game smaller and lets the GPU scale it up,
+//   which is what makes the fixed-size interface windows bigger;
+// - the game can't draw below 640x480, so at 480p a safe area is reached by
+//   scaling the image down instead.
+// Fills gPresentRect and returns the scale from game pixels to screen pixels.
+static float svgaComputeLayout(int modeWidth, int modeHeight, int uiScale, int safeArea, int* width, int* height)
+{
+    safeArea = std::clamp(safeArea, 0, 8);
+    uiScale = std::clamp(uiScale, 0, 2);
+    if (modeWidth < 1280) {
+        uiScale = 0;
+    }
+
+    static const float scales[3] = { 1.0f, 4.0f / 3.0f, 1.5f };
+    float areaWidth = (float)modeWidth * (100 - 2 * safeArea) / 100.0f;
+    float areaHeight = (float)modeHeight * (100 - 2 * safeArea) / 100.0f;
+
+    // Game size: the area at the chosen scale, kept to the area's shape but
+    // never below 640x480, and a multiple of 8 wide (the dirty-rect uploads
+    // work in 8x4 blocks).
+    float gameWidth = areaWidth / scales[uiScale];
+    float gameHeight = areaHeight / scales[uiScale];
+    if (gameHeight < 480.0f) {
+        gameWidth = gameWidth * 480.0f / gameHeight;
+        gameHeight = 480.0f;
+    }
+    if (gameWidth < 640.0f) {
+        gameHeight = gameHeight * 640.0f / gameWidth;
+        gameWidth = 640.0f;
+    }
+    *width = std::max(640, ((int)gameWidth) & ~7);
+    *height = std::max(480, ((int)gameHeight) & ~1);
+
+    float scale = std::min(areaWidth / *width, areaHeight / *height);
+    // Snap to exactly 1:1 when it's that close, so it stays pixel-sharp.
+    if (std::fabs(scale - 1.0f) < 0.01f) {
+        scale = 1.0f;
+    }
+
+    gPresentRect.w = (float)(int)(*width * scale + 0.5f);
+    gPresentRect.h = (float)(int)(*height * scale + 0.5f);
+    gPresentRect.x = (float)(int)((modeWidth - gPresentRect.w) / 2);
+    gPresentRect.y = (float)(int)((modeHeight - gPresentRect.h) / 2);
+    return scale;
+}
+
 // Bounding box of gSdlSurface changed since the last upload to gSdlTexture.
 static SDL_Rect dirty_rect;
 static bool dirty = false;
@@ -221,6 +275,13 @@ bool svga_init(VideoOptions* video_options)
         video_options->width = actualWidth;
         video_options->height = actualHeight;
     }
+
+    int modeWidth = video_options->width;
+    int modeHeight = video_options->height;
+    float presentScale = svgaComputeLayout(modeWidth, modeHeight, video_options->uiScale, video_options->safeArea,
+        &(video_options->width), &(video_options->height));
+    DbgPrint("svga_init: mode %dx%d, game %dx%d, scale %d/100, at %d,%d\n", modeWidth, modeHeight,
+        video_options->width, video_options->height, (int)(presentScale * 100.0f), (int)gPresentRect.x, (int)gPresentRect.y);
 #endif
 
     if (!createRenderer(video_options->width, video_options->height)) {
@@ -323,9 +384,11 @@ static bool createRenderer(int width, int height)
     // NXDK: pbkit always flips on vblank, so there is no vsync to request -
     // the SDL2 SDL_RENDERER_PRESENTVSYNC flag has no SDL3 equivalent here.
 
+#ifndef NXDK
     if (!SDL_SetRenderLogicalPresentation(gSdlRenderer, width, height, SDL_LOGICAL_PRESENTATION_LETTERBOX)) {
         return false;
     }
+#endif
 
 #ifdef NXDK
     // An 8-bit paletted texture: the GPU does the palette lookup. The palette
@@ -345,7 +408,14 @@ static bool createRenderer(int width, int height)
     }
 
     // Replaces the SDL2 SDL_HINT_RENDER_SCALE_QUALITY="0" hint.
+#ifdef NXDK
+    // Sharp pixels at 1:1; smooth them when the image is scaled by a
+    // non-whole amount, where nearest would make uneven pixels.
+    SDL_SetTextureScaleMode(gSdlTexture,
+        gPresentRect.w == (float)width ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR);
+#else
     SDL_SetTextureScaleMode(gSdlTexture, SDL_SCALEMODE_NEAREST);
+#endif
 
 #ifndef NXDK
     gSdlTextureSurface = SDL_CreateSurface(width, height, gSdlTexture->format);
@@ -402,7 +472,11 @@ void renderPresent()
     BC_MAIN("rp:clear");
     SDL_RenderClear(gSdlRenderer);
     BC_MAIN("rp:texture");
+#ifdef NXDK
+    SDL_RenderTexture(gSdlRenderer, gSdlTexture, NULL, &gPresentRect);
+#else
     SDL_RenderTexture(gSdlRenderer, gSdlTexture, NULL, NULL);
+#endif
     BC_MAIN("rp:present");
     SDL_RenderPresent(gSdlRenderer);
     BC_MAIN("rp:done");

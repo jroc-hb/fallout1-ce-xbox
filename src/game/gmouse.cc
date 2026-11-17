@@ -70,6 +70,15 @@ static int gmouse_click_to_scroll = 0;
 // 0x505268
 static int gmouse_scrolling_enabled = 1;
 
+#ifdef NXDK
+static bool gmouse_edge_scroll = true;
+
+void gmouse_set_edge_scroll(bool enabled)
+{
+    gmouse_edge_scroll = enabled;
+}
+#endif
+
 // 0x50526C
 static int gmouse_current_cursor = MOUSE_CURSOR_NONE;
 
@@ -2486,6 +2495,12 @@ static int gmouse_check_scrolling(int x, int y, int cursor)
     if (!gmouse_scrolling_enabled) {
         return -1;
     }
+
+#ifdef NXDK
+    if (!gmouse_edge_scroll) {
+        return -1;
+    }
+#endif
 
     int flags = 0;
 

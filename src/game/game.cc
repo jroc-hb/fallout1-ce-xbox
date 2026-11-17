@@ -163,6 +163,10 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
     video_options.height = 480;
     video_options.fullscreen = true;
     video_options.scale = 1;
+#ifdef NXDK
+    video_options.uiScale = 0;
+    video_options.safeArea = 0;
+#endif
 
     Config resolutionConfig;
     if (config_init(&resolutionConfig)) {
@@ -182,6 +186,12 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
                 video_options.height = std::max(screenHeight, 480);
                 debug_printf("video_options.height = %i\n", video_options.height);
             }
+
+#ifdef NXDK
+            config_get_value(&resolutionConfig, "XBOX", "UI_SCALE", &(video_options.uiScale));
+            config_get_value(&resolutionConfig, "XBOX", "SAFE_AREA", &(video_options.safeArea));
+            debug_printf("video_options.uiScale = %i, safeArea = %i\n", video_options.uiScale, video_options.safeArea);
+#endif
 
             bool windowed;
             if (configGetBool(&resolutionConfig, "MAIN", "WINDOWED", &windowed)) {

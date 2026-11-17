@@ -20,32 +20,47 @@ namespace fallout {
 
 // Gamepad settings read from config on init.
 // Deadzone: whole-number percentage (0-100), converted to [0.0..1.0] at use.
-// Sensitivity: user-facing 1-100 scale where 50 is the default and higher means faster.
-//   Converted at init to an internal divisor — see GamepadInit.
+// Sensitivity: 1-100, 50 is the recommended speed. Every 25 steps doubles
+//   (or halves) the speed, so 1 is about 1/4 and 100 is 4x the speed at 50,
+//   and equal steps feel like equal changes. See SensitivityScale.
 //
-// Left stick (default 40): moves the pointer at up to 10 * sensitivity px/s
-//   at 640x480 (scaled up for bigger screens, see ProcessLeftStick), through a
-//   response curve so small deflections give fine control.
+// Left stick: at 50 the pointer moves at up to kLeftStickPixelsPerSecond at
+//   640x480 (scaled up for bigger screens, see ProcessLeftStick), through a
+//   response curve so small deflections give fine control. 500 px/s crosses
+//   the 480p screen in about 1.3 s at full deflection.
 //
-// Right stick default (40): maps to internal divisor 62.5.
-//   Pans the map smoothly at stickValue * (32 px per divisor ms) across and
-//   (24 px per divisor ms) down, i.e. one scroll step per divisor ms at full
-//   deflection: 16 steps/sec at the default.
+// Right stick: at 50 the map pans one 32x24 scroll step per
+//   kRightStickStepMs at full deflection (20 steps/sec, the engine's old
+//   speed), smoothly at stickValue * (32 px per divisor ms) across and
+//   (24 px per divisor ms) down.
+static constexpr float kLeftStickPixelsPerSecond = 500.0f;
+static constexpr float kRightStickStepMs = 50.0f;
 static int gLeftStickDeadzonePercent  = 20;
 static int gRightStickDeadzonePercent = 20;
-static int gLeftStickSensitivity      = 40;
-static int gRightStickSensitivity     = 40;
+static int gLeftStickSensitivity      = 50;
+static int gRightStickSensitivity     = 50;
 // When set, panning with the right stick locks the pointer to the middle of
 // the map view (XBOX OPTS menu, [control] right_stick_center_cursor).
 static bool gRightStickCenterCursor   = true;
 // Slow the pointer over clickable things and bend it toward them
 // (XBOX OPTS, [control] pointer_assist).
 static bool gPointerAssist            = true;
+// Pointer on the right stick, camera on the left (XBOX OPTS "SWAP STICKS",
+// [control] swap_sticks). The stick clicks swap with them.
+static bool gSwapSticks               = false;
 
-// Internal divisors derived from the 1-100 sensitivity values in GamepadInit.
+// Derived from the 1-100 sensitivity values in GamepadInit.
 // Pointer speed at full deflection, in 640x480 pixels per second.
-static float gLeftStickPixelsPerSecond  = 400.0f;
-static float gRightStickInternalDivisor = 50.0f;
+static float gLeftStickPixelsPerSecond  = kLeftStickPixelsPerSecond;
+// Milliseconds per scroll step at full deflection.
+static float gRightStickInternalDivisor = kRightStickStepMs;
+
+// Speed multiplier for a 1-100 sensitivity: 1.0 at 50, x2 per 25 steps.
+static float SensitivityScale(int sensitivity)
+{
+    // exp, not exp2: nxdk's exp2/exp2f are assert(0) stubs.
+    return static_cast<float>(std::exp((sensitivity - 50) / 25.0 * 0.69314718055994531));
+}
 
 // Simulated mouse state using gamepad inputs
 int gGamepadLeftClick = 0;
@@ -188,9 +203,34 @@ void ReleaseChordKey()
 
 float leftStickX, leftStickY, rightStickX, rightStickY;
 
+// With the sticks swapped, the stick clicks follow their stick: the camera
+// stick's click still centers the camera.
+static int SwapStickButton(int button)
+{
+    if (gSwapSticks) {
+        if (button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
+            return SDL_GAMEPAD_BUTTON_RIGHT_STICK;
+        }
+        if (button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
+            return SDL_GAMEPAD_BUTTON_LEFT_STICK;
+        }
+    }
+    return button;
+}
+
 void HandleControllerAxisMotion(const SDL_Event& event)
 {
-    switch (event.gaxis.axis) {
+    int axis = event.gaxis.axis;
+    if (gSwapSticks) {
+        switch (axis) {
+        case SDL_GAMEPAD_AXIS_LEFTX: axis = SDL_GAMEPAD_AXIS_RIGHTX; break;
+        case SDL_GAMEPAD_AXIS_LEFTY: axis = SDL_GAMEPAD_AXIS_RIGHTY; break;
+        case SDL_GAMEPAD_AXIS_RIGHTX: axis = SDL_GAMEPAD_AXIS_LEFTX; break;
+        case SDL_GAMEPAD_AXIS_RIGHTY: axis = SDL_GAMEPAD_AXIS_LEFTY; break;
+        }
+    }
+
+    switch (axis) {
     case SDL_GAMEPAD_AXIS_LEFTX:
         leftStickXUnscaled = static_cast<float>(event.gaxis.value);
         ScaleLeftJoystick();
@@ -242,7 +282,7 @@ void HandleControllerButtonUp(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
 
-    switch (event.gbutton.button) {
+    switch (SwapStickButton(event.gbutton.button)) {
     case SDL_GAMEPAD_BUTTON_SOUTH: // Left Mouse Click
         gAButtonHeld = false;
         break;
@@ -342,7 +382,7 @@ void HandleControllerButtonUp(const SDL_Event& event)
 void HandleControllerButtonDown(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
-    switch (event.gbutton.button) {
+    switch (SwapStickButton(event.gbutton.button)) {
     case SDL_GAMEPAD_BUTTON_SOUTH: // Left Click
         gAButtonHeld = true;
         break;
@@ -481,23 +521,36 @@ void GamepadInit()
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_ASSIST_KEY, &pointerAssist);
     gPointerAssist = pointerAssist != 0;
 
+    int edgeScroll = 1;
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_EDGE_SCROLL_KEY, &edgeScroll);
+    gmouse_set_edge_scroll(edgeScroll != 0);
+
+    int swapSticks = gSwapSticks ? 1 : 0;
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_SWAP_STICKS_KEY, &swapSticks);
+    if ((swapSticks != 0) != gSwapSticks) {
+        gSwapSticks = swapSticks != 0;
+        // Drop whatever each stick was holding; new events will come in on
+        // the other one.
+        leftStickXUnscaled = leftStickYUnscaled = rightStickXUnscaled = rightStickYUnscaled = 0.0f;
+        ScaleLeftJoystick();
+        ScaleRightJoystick();
+    }
+
     // Clamp deadzone to a sane range so a bad config value can't break input.
     gLeftStickDeadzonePercent  = std::max(0, std::min(95, gLeftStickDeadzonePercent));
     gRightStickDeadzonePercent = std::max(0, std::min(95, gRightStickDeadzonePercent));
-    // Clamp sensitivity to 1-100; 0 would produce a division-by-zero in the conversion.
+    // Clamp sensitivity to the slider's 1-100.
     gLeftStickSensitivity  = std::max(1, std::min(100, gLeftStickSensitivity));
     gRightStickSensitivity = std::max(1, std::min(100, gRightStickSensitivity));
 
-    // Convert 1-100 user values to internal divisors. 50 == default behaviour.
-    // Higher user value = larger divisor at 50, smaller above — i.e. faster.
-    gLeftStickPixelsPerSecond  = 10.0f * static_cast<float>(gLeftStickSensitivity);
-    gRightStickInternalDivisor = (50.0f / static_cast<float>(gRightStickSensitivity)) * 50.0f;
+    gLeftStickPixelsPerSecond  = kLeftStickPixelsPerSecond * SensitivityScale(gLeftStickSensitivity);
+    gRightStickInternalDivisor = kRightStickStepMs / SensitivityScale(gRightStickSensitivity);
 
     debug_printf("Gamepad config: left_deadzone=%d%% right_deadzone=%d%% left_sensitivity=%d (px/s=%.2f) right_sensitivity=%d (divisor=%.2f)\n",
         gLeftStickDeadzonePercent, gRightStickDeadzonePercent,
         gLeftStickSensitivity, gLeftStickPixelsPerSecond,
         gRightStickSensitivity, gRightStickInternalDivisor);
-    debug_printf("Gamepad config: center_cursor=%d pointer_assist=%d\n", gRightStickCenterCursor ? 1 : 0, gPointerAssist ? 1 : 0);
+    debug_printf("Gamepad config: center_cursor=%d pointer_assist=%d edge_scroll=%d swap_sticks=%d\n", gRightStickCenterCursor ? 1 : 0, gPointerAssist ? 1 : 0, edgeScroll != 0 ? 1 : 0, gSwapSticks ? 1 : 0);
 }
 
 void ProcessLeftStick()

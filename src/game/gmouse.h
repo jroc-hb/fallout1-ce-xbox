@@ -127,6 +127,10 @@ void gmouse_pointer_assist(float* dx, float* dy);
 // none, leaving everything unchanged.
 bool gmouse_jump_to_target(int dirX, int dirY);
 
+// Whether pushing the pointer against a screen edge scrolls the map
+// (XBOX OPTS "EDGE SCROLL"; the right stick pans either way).
+void gmouse_set_edge_scroll(bool enabled);
+
 // Drops the d-pad selection if it is `obj` (the object is being removed from
 // the map). Safe to call with any object.
 void gmouse_forget_target(Object* obj);
