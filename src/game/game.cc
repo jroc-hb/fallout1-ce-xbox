@@ -56,6 +56,9 @@
 #include "plib/gnw/memory.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
+#ifdef NXDK
+#include "plib/gnw/gamepad.hpp"
+#endif
 
 
 namespace fallout {
@@ -137,6 +140,11 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
 
     gconfig_init(isMapper, argc, argv);
     debug_printf("gconfig_init done\n");
+#ifdef NXDK
+    // Apply the saved stick settings ([control] in fallout.cfg). Otherwise they
+    // only took effect after APPLY in the XBOX OPTS menu.
+    GamepadInit();
+#endif
 
     game_in_mapper = isMapper;
 

@@ -382,6 +382,7 @@ static void xbox_options_menu()
     int rightDeadzone = 20;
     int leftSensitivity = 50;
     int rightSensitivity = 50;
+    int centerCursor = 1;
 
     int initialResolutionChoice = 0;
     Config resolutionConfig;
@@ -404,9 +405,11 @@ static void xbox_options_menu()
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_DEADZONE_KEY, &rightDeadzone);
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY, &leftSensitivity);
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_SENSITIVITY_KEY, &rightSensitivity);
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_CENTER_CURSOR_KEY, &centerCursor);
+    centerCursor = centerCursor != 0 ? 1 : 0;
 
     const int windowWidth = 560;
-    const int windowHeight = 340;
+    const int windowHeight = 390;
 
     int win = win_add((screenGetWidth() - windowWidth) / 2,
         (screenGetHeight() - windowHeight) / 2,
@@ -423,7 +426,7 @@ static void xbox_options_menu()
     bool done = false;
     bool save = false;
     int selected = 0;
-    const int itemsCount = 5;
+    const int itemsCount = 6;
 
     while (!done) {
         win_fill(win, 0, 0, windowWidth, windowHeight, 0x100 | 1);
@@ -478,8 +481,17 @@ static void xbox_options_menu()
             win_box(win, 14, 283, 522, 307, colorTable[24519]);
         }
 
-        win_print(win, "APPLY (START)", 0, 45, 310, colorTable[992]);
-        win_print(win, "CANCEL (BACK)", 0, 320, 310, colorTable[31744]); // red
+        snprintf(tmp, sizeof(tmp), "Right stick centers cursor: %s", centerCursor ? "ON" : "OFF");
+        win_print(win, tmp, 0, 16, 310, colorTable[21091]);
+        win_box(win, 16, 335, 520, 355, 0x100 | 0);
+        int centerFill = centerCursor ? 503 : 260;
+        win_fill(win, 17, 336, centerFill, 19, 0x100 | 3);
+        if (selected == 5) {
+            win_box(win, 14, 333, 522, 357, colorTable[24519]);
+        }
+
+        win_print(win, "APPLY (START)", 0, 45, 362, colorTable[992]);
+        win_print(win, "CANCEL (BACK)", 0, 320, 362, colorTable[31744]); // red
 
         win_draw(win);
 
@@ -502,6 +514,8 @@ static void xbox_options_menu()
                 leftSensitivity = std::max(1, leftSensitivity - 1);
             } else if (selected == 4) {
                 rightSensitivity = std::max(1, rightSensitivity - 1);
+            } else if (selected == 5) {
+                centerCursor = 0;
             }
             break;
         case KEY_ARROW_RIGHT:
@@ -515,6 +529,8 @@ static void xbox_options_menu()
                 leftSensitivity = std::min(100, leftSensitivity + 1);
             } else if (selected == 4) {
                 rightSensitivity = std::min(100, rightSensitivity + 1);
+            } else if (selected == 5) {
+                centerCursor = 1;
             }
             break;
         case KEY_ESCAPE:
@@ -544,6 +560,7 @@ static void xbox_options_menu()
         config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_DEADZONE_KEY, rightDeadzone);
         config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY, leftSensitivity);
         config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_SENSITIVITY_KEY, rightSensitivity);
+        config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_CENTER_CURSOR_KEY, centerCursor);
 
         gconfig_save();
         GamepadInit();

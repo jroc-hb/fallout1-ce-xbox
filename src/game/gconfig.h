@@ -94,6 +94,7 @@ namespace fallout {
 #define GAME_CONFIG_RIGHT_STICK_DEADZONE_KEY "right_stick_deadzone"
 #define GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY "left_stick_sensitivity"
 #define GAME_CONFIG_RIGHT_STICK_SENSITIVITY_KEY "right_stick_sensitivity"
+#define GAME_CONFIG_RIGHT_STICK_CENTER_CURSOR_KEY "right_stick_center_cursor"
 #endif
 
 #define ENGLISH "english"

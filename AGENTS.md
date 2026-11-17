@@ -253,6 +253,13 @@ engine's 32x24 px scroll steps.
   view (PS4 Planescape-style), so the hex cursor lands on the center hex when the camera stops. It
   skips this while map scrolling is disabled (dialogue, enemy turns, loading) or when another
   window covers the screen center (inventory, Pip-Boy). The left stick still moves the pointer.
+  The lock is optional: XBOX OPTS "Right stick centers cursor" sets `[control]
+  right_stick_center_cursor` in `fallout.cfg` (default 1). With it off the pan cursor still shows,
+  wherever the pointer is.
+- `GamepadInit()` (which reads the `[control]` stick settings) used to run only on APPLY in XBOX
+  OPTS, so saved deadzone/sensitivity were ignored after a reboot. `game_init` now calls it right
+  after `gconfig_init`. Its first `debug_printf` line is garbled because nxdk's `debug_printf` here
+  mishandles `%%` and `%.2f`.
 - XEMU's default keyboard map puts the right stick on I/J/K/L, which is how it was tested.
 
 **Gamepad mapping must be registered before `SDL_INIT_JOYSTICK`.** The Original Xbox pad needs the

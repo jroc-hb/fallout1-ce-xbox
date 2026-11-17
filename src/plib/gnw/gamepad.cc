@@ -32,6 +32,9 @@ static int gLeftStickDeadzonePercent  = 20;
 static int gRightStickDeadzonePercent = 20;
 static int gLeftStickSensitivity      = 40;
 static int gRightStickSensitivity     = 40;
+// When set, panning with the right stick locks the pointer to the middle of
+// the map view (XBOX OPTS menu, [control] right_stick_center_cursor).
+static bool gRightStickCenterCursor   = true;
 
 // Internal divisors derived from the 1-100 sensitivity values in GamepadInit.
 static float gLeftStickInternalDivisor  = 2.0f;
@@ -501,6 +504,9 @@ void GamepadInit()
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_DEADZONE_KEY, &gRightStickDeadzonePercent);
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY,  &gLeftStickSensitivity);
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_SENSITIVITY_KEY, &gRightStickSensitivity);
+    int centerCursor = gRightStickCenterCursor ? 1 : 0;
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_CENTER_CURSOR_KEY, &centerCursor);
+    gRightStickCenterCursor = centerCursor != 0;
 
     // Clamp deadzone to a sane range so a bad config value can't break input.
     gLeftStickDeadzonePercent  = std::max(0, std::min(95, gLeftStickDeadzonePercent));
@@ -518,6 +524,7 @@ void GamepadInit()
         gLeftStickDeadzonePercent, gRightStickDeadzonePercent,
         gLeftStickSensitivity, gLeftStickInternalDivisor,
         gRightStickSensitivity, gRightStickInternalDivisor);
+    debug_printf("Gamepad config: center_cursor=%d\n", gRightStickCenterCursor ? 1 : 0);
 }
 
 void ProcessLeftStick()
@@ -574,8 +581,10 @@ void ProcessRightStick()
     }
 
     // Pan around a pointer locked to the middle of the screen, so the hex
-    // cursor lands on the center hex when the camera stops.
-    map_center_mouse();
+    // cursor lands on the center hex when the camera stops (optional).
+    if (gRightStickCenterCursor) {
+        map_center_mouse();
+    }
 
     // Same speed as the stepped scrolling this replaced: one 32x24 px scroll
     // step per divisor ms at full deflection. Positive stick Y scrolls up, as
