@@ -24,6 +24,17 @@ void ProcessLeftStick();
 void ProcessRightStick();
 void ProcessTriggers();
 
+// Rumble every pad: `low`/`high` are the big (low frequency) and small
+// (high frequency) motors, 0..1, scaled by the RUMBLE setting. Overlapping
+// calls keep the stronger values.
+void GamepadRumble(float low, float high, int durationMs);
+// The same at an explicit strength 0-100 (XBOX OPTS preview).
+void GamepadRumbleAtStrength(float low, float high, int durationMs, int strength);
+// The pointer haptic tick at strength 0-100.
+void GamepadPointerHapticTick(int strength);
+// Stops a rumble whose time is up; call every frame.
+void GamepadRumbleUpdate();
+
 } // namespace fallout
 
 #endif /* FALLOUT_PLIB_GNW_GAMEPAD_H_ */

@@ -2663,7 +2663,7 @@ static bool gmouse_pointer_assist_wants(Object* obj, int mode)
     return false;
 }
 
-void gmouse_pointer_assist(float* dx, float* dy)
+void gmouse_pointer_assist(float* dx, float* dy, const void** target)
 {
     if (!gmouse_initialized || !gmouse_enabled || gmouse_mapper_mode != 0) {
         return;
@@ -2725,6 +2725,9 @@ void gmouse_pointer_assist(float* dx, float* dy)
 
         if (distance == 0 && obj_intersects_with(obj, mouseX, mouseY) != 0) {
             over = true;
+            if (target != NULL && *target == NULL) {
+                *target = obj;
+            }
         }
 
         if (distance < bestDistance) {

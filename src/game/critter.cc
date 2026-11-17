@@ -16,6 +16,7 @@
 #include "game/object.h"
 #include "game/party.h"
 #include "game/proto.h"
+#include "game/rumble.h"
 #include "game/queue.h"
 #include "game/reaction.h"
 #include "game/roll.h"
@@ -311,6 +312,7 @@ int critter_check_poison(Object* obj, void* data)
 
     critter_adjust_poison(obj, -2);
     critter_adjust_hits(obj, -1);
+    rumble_poison();
 
     intface_update_hit_points(false);
 

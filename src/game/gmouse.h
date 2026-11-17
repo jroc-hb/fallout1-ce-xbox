@@ -119,7 +119,7 @@ void gameMouseRefreshImmediately();
 // Analog-stick pointer assist: slows the pointer over things it can act on
 // in the current mode and bends its path toward one it is heading for.
 // (dx, dy) is this frame's pointer movement in pixels, adjusted in place.
-void gmouse_pointer_assist(float* dx, float* dy);
+void gmouse_pointer_assist(float* dx, float* dy, const void** target);
 
 // Jumps the pointer to the nearest object it can act on in direction
 // (dirX, dirY) (a d-pad direction, -1/0/1 each), switching from walking to

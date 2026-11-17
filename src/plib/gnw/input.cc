@@ -224,6 +224,8 @@ void process_bk()
 
     GNW_do_bk_process();
 
+    GamepadRumbleUpdate();
+
     if (vcr_update() != 3) {
         mouse_info();
     }

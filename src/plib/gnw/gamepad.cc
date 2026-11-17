@@ -48,6 +48,16 @@ static bool gPointerAssist            = true;
 // Pointer on the right stick, camera on the left (XBOX OPTS "SWAP STICKS",
 // [control] swap_sticks). The stick clicks swap with them.
 static bool gSwapSticks               = false;
+// Rumble strength 0-100, 0 = off (XBOX OPTS "RUMBLE", [control] rumble).
+static int gRumbleStrength            = 100;
+// A short buzz when the pointer moves onto something clickable (XBOX OPTS
+// "POINTER ASSIST" +RUMBLE, [control] pointer_haptics).
+static bool gPointerHaptics           = false;
+
+// The rumble playing now, so a weaker one can't cut a stronger one short.
+static float gRumbleLow               = 0.0f;
+static float gRumbleHigh              = 0.0f;
+static Uint64 gRumbleEndTicks         = 0;
 
 // Derived from the 1-100 sensitivity values in GamepadInit.
 // Pointer speed at full deflection, in 640x480 pixels per second.
@@ -521,6 +531,12 @@ void GamepadInit()
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_ASSIST_KEY, &pointerAssist);
     gPointerAssist = pointerAssist != 0;
 
+    int pointerHaptics = gPointerHaptics ? 1 : 0;
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_HAPTICS_KEY, &pointerHaptics);
+    gPointerHaptics = pointerHaptics != 0;
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RUMBLE_KEY, &gRumbleStrength);
+    gRumbleStrength = std::max(0, std::min(100, gRumbleStrength));
+
     int edgeScroll = 1;
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_EDGE_SCROLL_KEY, &edgeScroll);
     gmouse_set_edge_scroll(edgeScroll != 0);
@@ -551,6 +567,86 @@ void GamepadInit()
         gLeftStickSensitivity, gLeftStickPixelsPerSecond,
         gRightStickSensitivity, gRightStickInternalDivisor);
     debug_printf("Gamepad config: center_cursor=%d pointer_assist=%d edge_scroll=%d swap_sticks=%d\n", gRightStickCenterCursor ? 1 : 0, gPointerAssist ? 1 : 0, edgeScroll != 0 ? 1 : 0, gSwapSticks ? 1 : 0);
+    debug_printf("Gamepad config: rumble=%d pointer_haptics=%d\n", gRumbleStrength, gPointerHaptics ? 1 : 0);
+}
+
+// Rumble every open pad. Following only the pad that last sent input
+// picked the wrong one when one controller shows up as two pads (XEMU can
+// bind a host pad so its input arrives on two ports, the second last, with no
+// motor behind it): shots never rumbled. One player, so all pads is fine.
+// Returns false if any pad refused.
+static bool GamepadRumbleAll(Uint16 low, Uint16 high, Uint32 durationMs)
+{
+    bool ok = true;
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    if (ids != nullptr) {
+        for (int index = 0; index < count; index++) {
+            SDL_Gamepad* gamepad = SDL_GetGamepadFromID(ids[index]);
+            if (gamepad != nullptr && !SDL_RumbleGamepad(gamepad, low, high, durationMs)) {
+                ok = false;
+            }
+        }
+        SDL_free(ids);
+    }
+    return ok;
+}
+
+// Stops the motors when the current rumble's time is up. SDL would do this
+// itself, but only while events are pumped, and combat's wait loop
+// (combat_turn_run) runs whole enemy turns without pumping them: a hit there
+// rumbled until the player's next turn. Called from process_bk, which every
+// loop runs.
+void GamepadRumbleUpdate()
+{
+    if (gRumbleEndTicks == 0 || SDL_GetTicks() < gRumbleEndTicks) {
+        return;
+    }
+
+    if (!GamepadRumbleAll(0, 0, 0)) {
+        return; // Try again next frame.
+    }
+
+    gRumbleEndTicks = 0;
+    gRumbleLow = 0.0f;
+    gRumbleHigh = 0.0f;
+}
+
+void GamepadRumbleAtStrength(float low, float high, int durationMs, int strength)
+{
+    if (strength <= 0 || durationMs <= 0) {
+        return;
+    }
+
+    // Overlapping rumbles: keep the stronger of each motor until the later
+    // one ends.
+    const Uint64 now = SDL_GetTicks();
+    Uint64 end = now + static_cast<Uint64>(durationMs);
+    if (now < gRumbleEndTicks) {
+        low = std::max(low, gRumbleLow);
+        high = std::max(high, gRumbleHigh);
+        end = std::max(end, gRumbleEndTicks);
+    }
+    gRumbleLow = low;
+    gRumbleHigh = high;
+    gRumbleEndTicks = end;
+
+    const float scale = 65535.0f * static_cast<float>(std::min(strength, 100)) / 100.0f;
+    const Uint16 lowValue = static_cast<Uint16>(std::max(0.0f, std::min(1.0f, low)) * scale);
+    const Uint16 highValue = static_cast<Uint16>(std::max(0.0f, std::min(1.0f, high)) * scale);
+    GamepadRumbleAll(lowValue, highValue, static_cast<Uint32>(end - now));
+}
+
+void GamepadRumble(float low, float high, int durationMs)
+{
+    GamepadRumbleAtStrength(low, high, durationMs, gRumbleStrength);
+}
+
+void GamepadPointerHapticTick(int strength)
+{
+    // The small (high frequency) motor only: a short tick, not a shake. It
+    // needs ~40 ms to spin up enough to feel on the Xbox pad.
+    GamepadRumbleAtStrength(0.0f, 0.55f, 45, strength);
 }
 
 void ProcessLeftStick()
@@ -592,8 +688,17 @@ void ProcessLeftStick()
     float moveX = leftStickX / length * pixels;
     float moveY = -leftStickY / length * pixels;
 
-    if (gPointerAssist && !win_pointer_assist(&moveX, &moveY)) {
-        gmouse_pointer_assist(&moveX, &moveY);
+    // The button or object the pointer is on, for the haptic tick.
+    static const void* lastTarget = nullptr;
+    const void* target = nullptr;
+    if (gPointerAssist && !win_pointer_assist(&moveX, &moveY, &target)) {
+        gmouse_pointer_assist(&moveX, &moveY, &target);
+    }
+    if (target != lastTarget) {
+        if (target != nullptr && gPointerHaptics) {
+            GamepadPointerHapticTick(gRumbleStrength);
+        }
+        lastTarget = target;
     }
 
     remainderX += moveX;

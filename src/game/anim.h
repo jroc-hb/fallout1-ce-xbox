@@ -112,6 +112,8 @@ void anim_init();
 void anim_reset();
 void anim_exit();
 int register_begin(int a1);
+void register_rumble_next(int cue);
+void register_rumble_clear();
 int register_priority(int a1);
 int register_clear(Object* a1);
 int register_end();

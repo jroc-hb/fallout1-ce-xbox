@@ -1312,7 +1312,7 @@ static bool win_pointer_assist_wants(Window* w, Button* button)
     return true;
 }
 
-bool win_pointer_assist(float* dx, float* dy)
+bool win_pointer_assist(float* dx, float* dy, const void** target)
 {
     int mouseX;
     int mouseY;
@@ -1347,6 +1347,9 @@ bool win_pointer_assist(float* dx, float* dy)
 
         found = true;
         if (distance == 0) {
+            if (target != NULL && *target == NULL) {
+                *target = button;
+            }
             int width = right - left + 1;
             int height = bottom - top + 1;
             if (width <= UI_ASSIST_FRICTION_MAX_SIZE || height <= UI_ASSIST_FRICTION_MAX_SIZE) {

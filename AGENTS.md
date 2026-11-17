@@ -163,10 +163,16 @@ Run them from WSL with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File 
   it, x64, taken from the `vgamepad` 0.2.0 PyPI sdist) and reads commands from stdin:
   `lx|ly|rx|ry <-1..1>`, `lt|rt <0..1>`, `btn <a|b|x|y|lb|rb|back|start|ls|rs|up|down|left|right> <0|1>`,
   `wait <ms>`, `ramp <axis> <from> <to> <ms>`, `reset`, `quit`. It prints `ready`, then `ok <cmd>`
-  per command. Run it as a background task fed from a file, then append commands to the file:
+  per command, and `rumble <large 0-255> <small 0-255> <ms>` whenever rumble reaches the pad
+  (XEMU forwards the game's rumble to it), so rumble can be checked without feeling it. Run it as a background task fed from a file, then append commands to the file:
   `tail -n +1 -f cmds.txt | powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'E:\Xbox\Development\XEMU\vigem\pad.ps1' > pad.log`.
   XEMU binds it to port 3 (`xemu.toml` `port3`, an Xbox 360 GUID), and the game sees it as
   `Original Xbox Controller #2`; it keeps working across XEMU restarts while the server runs.
+  If the game logs more pads than expected (`Opening game controller` x4), every press may arrive
+  twice from two pad IDs (confirmed 2026-11-17: one A press came from pads 642 and 609), so menus
+  move two rows and toggles cancel out. The cause was several `pad.ps1` servers running at once
+  (each makes its own ViGEm pad, mirroring the same commands): run exactly one
+  (`pgrep -af pad.ps1`). With one server the game sees 2-3 pads and each press arrives once.
   **XEMU passes triggers as digital**: the game only ever receives 0 or 32767 (threshold between
   0.5 and 0.75), so analog trigger behaviour can't be tested in XEMU. Sticks are fully analog.
   To measure pointer speed exactly, log the summed `gLeftStickDeltaX/Y` per stick deflection from
@@ -192,11 +198,13 @@ SDL-created threads on nxdk-sdl3 get very small stacks (about 4 KB), so keep lar
 **XBOX OPTS screen** (`xboxopts.cc`, 470x480). It is pieced together from the Preferences screen
 art (`PREFSCRN.FRM`, interface fid 240) so it matches the game: the left column with all five
 rotary-knob panels in place (`PRFBKNBS.FRM`, four 46x47 positions stacked; DISPLAY uses all four),
-two copies of the right column's two-slider panel plus a one-slider panel cut from it
-(`PRFSLDOF/ON.FRM` knobs), and the bottom button strip in place with `LILREDUP/DN.FRM`. Knobs:
-DISPLAY, PAN CENTERS CURSOR, POINTER ASSIST, EDGE SCROLL, SWAP STICKS. Sliders: POINTER/CAMERA
-deadzone and sensitivity (the `left_stick_*`/`right_stick_*` keys: "left" is the pointer stick,
-whichever physical stick that is), SAFE AREA. Coordinates are the Preferences screen's (`options.cc` `btndat`, `UpdateThing`),
+three copies of the right column's two-slider panel, the third with 12 rows of empty texture cut
+out so it fits (`PRFSLDOF/ON.FRM` knobs), and the bottom button strip in place with
+`LILREDUP/DN.FRM`. There is no spare room left. Knobs:
+DISPLAY, PAN CENTERS CURSOR, POINTER ASSIST (OFF/ON/+RUMBLE), EDGE SCROLL, SWAP STICKS. Sliders:
+POINTER/CAMERA deadzone and sensitivity (the `left_stick_*`/`right_stick_*` keys: "left" is the
+pointer stick, whichever physical stick that is), SAFE AREA, RUMBLE. The hint corner says
+"CHANGING THIS RESTARTS GAME" while DISPLAY or SAFE AREA is selected. Coordinates are the Preferences screen's (`options.cc` `btndat`, `UpdateThing`),
 shifted as noted in the file. D-pad up/down selects, left/right changes, START (sent as Escape)
 applies, BACK (`b`) cancels; the mouse works on the knobs, sliders and buttons too.
 - It edits `f1_res.ini` (`[MAIN] SCR_WIDTH/SCR_HEIGHT` = video mode, `[XBOX] UI_SCALE` 0-2 and
@@ -341,6 +349,9 @@ engine's 32x24 px scroll steps.
   window). Pull radius 24 px; friction (50%) only on buttons 40 px or less in one dimension, and
   nothing at all while inside a bigger one (e.g. the active item slot). The steering maths for both
   assists is in `plib/gnw/pointer_assist.h`.
+- **Pointer haptics** (`[control] pointer_haptics`, default 0; the POINTER ASSIST knob's +RUMBLE
+  position, which also means assist on). Both assists report the button/object the pointer is on;
+  `ProcessLeftStick` plays a 45 ms small-motor tick when that changes to a new one.
 - **D-pad target jumping** (`gmouse_jump_to_target`, gmouse.cc; called from the arrow-key cases in
   `game.cc` `game_handle_input`, so only in the map view). Jumps the pointer to the nearest
   pickable object within ~50 degrees of the pressed direction (same filter as the map assist, on
@@ -360,6 +371,34 @@ engine's 32x24 px scroll steps.
   `gmouse_forget_target`, and `gmouse_reset` clears it without touching the object.
 - The Preferences "Mouse Sensitivity" slider has no effect on Xbox (the scaling in `mouse.cc` is
   in the non-NXDK branch).
+
+**Rumble** (`game/rumble.cc`, `GamepadRumble` in gamepad.cc). `[control] rumble` 0-100 scales
+everything (0 = off, default 100); XBOX OPTS previews it while the slider moves. Rumble goes to
+**every** open pad, and an overlapping weaker rumble never cuts a stronger one short. It used to
+follow the pad that last sent input, but XEMU can deliver one host pad's input on two emulated
+ports (the second one last, with no motor behind it), so shots never rumbled for the user. Events:
+- Player hit (scaled by damage / max HP), knocked down/out, killed; the player's critical hits; an
+  enemy's critical hit on the player is stronger; explosions (fading out to 16 hexes); poison ticks;
+  recoil when the player fires a gun (`rumble_cue_fire`: by weapon skill, longer for bursts).
+- Recoil is queued right after the attacker's attack animation in `action_ranged`; the next step
+  registered there waits for the animation's action frame (projectile shown, target dodges, or the
+  target's hit), so it lands on the shot. Pending cues merge (stronger motor, longer duration), so
+  recoil plus a critical-hit kick on the same step both count. Use `register_rumble_clear` to drop
+  a cue nobody took.
+- **The game stops the motors itself** (`GamepadRumbleUpdate`, called from `process_bk`). SDL only
+  expires a rumble while events are pumped, and `combat_turn_run` runs whole enemy turns calling
+  only `process_bk`: a knockdown rumble ran until the player's next turn.
+- Combat damage is only *applied* after the attack animation ends, so hit rumble isn't fired from
+  `apply_damage`. `show_damage_to_object` calls `register_rumble_next(cue)`, and the next animation
+  step it registers carries the cue (`AnimationDescription::rumble`, attached in `check_registry`)
+  and plays it when `anim_set_check` starts that step: the frame the hit shows. It takes no extra
+  step: a sequence holds only 40 and overflowing cancels the whole attack. Explosions mark their
+  sound step the same way. Paths without animation (`action_explode`/`action_dmg` unanimated)
+  play the cue directly.
+- Verified in XEMU via the virtual pad's rumble log (menu preview, pointer ticks, an explosion next
+  to the player plus its hit, pistol recoil on a hit and a miss ~450 ms after the attack is queued,
+  a stop during a non-pumping loop). Not felt on real hardware yet; enemy hits, criticals and death
+  weren't triggered in a test.
 
 **Gamepad mapping must be registered before `SDL_INIT_JOYSTICK`.** The Original Xbox pad needs the
 game's `default` mapping (`GamepadRegisterDefaultMapping` in `gamepad.cc`). The mapping is set via

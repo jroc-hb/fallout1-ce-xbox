@@ -32,7 +32,10 @@ int win_button_press_and_release(int btn);
 // Analog-stick pointer assist over UI buttons in the window under the
 // pointer (see pointer_assist.h). Returns false if no button is near, so
 // the map assist can run instead.
-bool win_pointer_assist(float* dx, float* dy);
+// Pointer assist on the buttons of the window under the pointer; true if it
+// found one nearby (then the map assist doesn't run). `target` gets the
+// button the pointer is on, if any.
+bool win_pointer_assist(float* dx, float* dy, const void** target);
 int win_get_button_center_x(int btn);
 int win_get_button_center_y(int btn);
 int win_get_button_top_right_x(int btn);

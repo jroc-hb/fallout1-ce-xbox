@@ -21,6 +21,7 @@
 #include "game/protinst.h"
 #include "game/proto.h"
 #include "game/roll.h"
+#include "game/rumble.h"
 #include "game/scripts.h"
 #include "game/skill.h"
 #include "game/stat.h"
@@ -45,6 +46,10 @@ static int action_ranged(Attack* attack, int a2);
 static int is_next_to(Object* a1, Object* a2);
 static int action_climb_ladder(Object* a1, Object* a2);
 static int report_explosion(Attack* attack, Object* a2);
+
+// Set by show_damage around its call for the defender of a critical hit, for
+// the rumble cue.
+static bool show_damage_critical = false;
 static int finished_explosion(Object* a1, Object* a2);
 static int compute_explosion_damage(int min, int max, Object* a3, int* a4);
 static int can_talk_to(Object* a1, Object* a2);
@@ -266,6 +271,9 @@ void show_damage_to_object(Object* defender, int damage, int flags, Object* weap
     int fid;
     const char* sfx_name;
 
+    // The first step registered below shows the hit; it plays the rumble.
+    register_rumble_next(rumble_cue_hit(defender, damage, flags, show_damage_critical, attacker));
+
     anim = FID_ANIM_TYPE(defender->fid);
     if (!critter_is_prone(defender)) {
         if ((flags & DAM_DEAD) != 0) {
@@ -367,9 +375,12 @@ void show_damage_to_object(Object* defender, int damage, int flags, Object* weap
         if ((flags & DAM_DEAD) != 0 && (defender->data.critter.combat.results & DAM_DEAD) == 0) {
             anim = action_blood(defender, anim, delay);
         } else {
+            register_rumble_clear();
             return;
         }
     }
+
+    register_rumble_clear();
 
     if (weapon != NULL) {
         if ((flags & DAM_EXPLODE) != 0) {
@@ -436,6 +447,7 @@ int show_damage_target(Attack* attack)
 
         register_begin(ANIMATION_REQUEST_RESERVED);
         register_priority(1);
+        show_damage_critical = (attack->attackerFlags & (DAM_HIT | DAM_CRITICAL)) == (DAM_HIT | DAM_CRITICAL);
         show_damage_to_object(attack->defender,
             attack->defenderDamage,
             attack->defenderFlags,
@@ -446,6 +458,7 @@ int show_damage_target(Attack* attack)
             item_w_anim(attack->attacker, attack->hitMode),
             attack->attacker,
             0);
+        show_damage_critical = false;
         register_end();
     }
 
@@ -502,6 +515,7 @@ void show_damage(Attack* attack, int a2, int delay)
     } else {
         if (attack->defender != NULL) {
             hit_from_front = is_hit_from_front(attack->attacker, attack->defender);
+            show_damage_critical = (attack->attackerFlags & DAM_CRITICAL) != 0;
 
             if (FID_TYPE(attack->defender->fid) == OBJ_TYPE_CRITTER) {
                 if (attack->attacker->fid == 33554933) {
@@ -527,6 +541,7 @@ void show_damage(Attack* attack, int a2, int delay)
                         delay);
                 }
             }
+            show_damage_critical = false;
         }
 
         if ((attack->attackerFlags & DAM_DUD) != 0) {
@@ -715,6 +730,11 @@ static int action_ranged(Attack* attack, int anim)
 
     register_object_animate(attack->attacker, anim, 0);
 
+    // Recoil. The next step registered waits for the attack animation's
+    // action frame (the projectile appearing, the target dodging or being
+    // hit), so it lands on the shot.
+    register_rumble_next(rumble_cue_fire(attack->attacker, weapon, attack->hitMode, anim));
+
     if (anim != ANIM_FIRE_CONTINUOUS) {
         if ((attack->attackerFlags & DAM_HIT) != 0 || (attack->attackerFlags & DAM_CRITICAL) == 0) {
             bool l56 = false;
@@ -793,6 +813,7 @@ static int action_ranged(Attack* attack, int anim)
                         register_object_change_fid(projectile, explosionFid, -1);
 
                         const char* sfx = gsnd_build_weapon_sfx_name(WEAPON_SOUND_EFFECT_HIT, weapon, attack->hitMode, attack->defender);
+                        register_rumble_next(rumble_cue_explosion(v24, attack->defender->elevation));
                         register_object_play_sfx(projectile, sfx, 0);
 
                         register_object_animate_and_hide(projectile, ANIM_STAND, 0);
@@ -1632,6 +1653,7 @@ int action_explode(int tile, int elevation, int minDamage, int maxDamage, Object
 
         register_begin(ANIMATION_REQUEST_RESERVED);
         register_priority(1);
+        register_rumble_next(rumble_cue_explosion(tile, elevation));
         register_object_play_sfx(explosion, "whn1xxx1", 0);
         register_object_funset(explosion, OBJECT_HIDDEN, 0);
         register_object_animate_and_hide(explosion, ANIM_STAND, 0);
@@ -1680,6 +1702,7 @@ int action_explode(int tile, int elevation, int minDamage, int maxDamage, Object
             }
         }
 
+        rumble_play_cue(rumble_cue_explosion(tile, elevation));
         report_explosion(attack, a5);
 
         combat_explode_scenery(explosion, NULL);
@@ -1917,6 +1940,8 @@ void action_dmg(int tile, int elevation, int minDamage, int maxDamage, int damag
                 critter_kill(defender, -1, 1);
             }
         }
+
+        rumble_play_cue(rumble_cue_hit(defender, attack->defenderDamage, attack->defenderFlags, false, NULL));
 
         // NOTE: Uninline.
         report_dmg(attack, NULL);

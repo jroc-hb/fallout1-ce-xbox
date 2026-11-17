@@ -19,6 +19,7 @@
 #include "game/object.h"
 #include "game/perk.h"
 #include "game/protinst.h"
+#include "game/rumble.h"
 #include "game/proto.h"
 #include "game/roll.h"
 #include "game/scripts.h"
@@ -203,6 +204,10 @@ typedef struct AnimationDescription {
         void* param3;
     };
     CacheEntry* artCacheKey;
+
+    // Controller rumble cue (rumble.h) played when this step starts, or 0.
+    // Set with register_rumble_next.
+    int rumble;
 } AnimationDescription;
 
 typedef struct AnimationSequence {
@@ -293,6 +298,9 @@ static PathNode dad[2000];
 // 0x560314
 static AnimationSequence anim_set[ANIMATION_SEQUENCE_LIST_CAPACITY];
 
+// Rumble cue for the next registered step (register_rumble_next).
+static int anim_pending_rumble = 0;
+
 // 0x56A1E4
 static unsigned char seen[5000];
 
@@ -371,7 +379,28 @@ int register_begin(int requestOptions)
 
     curr_anim_counter = 0;
 
+    for (int index = 0; index < ANIMATION_DESCRIPTION_LIST_CAPACITY; index++) {
+        animationSequence->animations[index].rumble = 0;
+    }
+    anim_pending_rumble = 0;
+
     return 0;
+}
+
+// The next step registered in the current sequence plays `cue` (a rumble.h
+// cue) when it starts, so the rumble lands on the frame the hit shows. It
+// takes no slot of its own. A cue already pending is merged with this one
+// (the stronger of each motor), e.g. the player's shot recoil and the
+// critical hit it lands on the same step.
+void register_rumble_next(int cue)
+{
+    anim_pending_rumble = curr_anim_set != -1 ? rumble_cue_merge(anim_pending_rumble, cue) : 0;
+}
+
+// Drop a pending cue that no step took.
+void register_rumble_clear()
+{
+    anim_pending_rumble = 0;
 }
 
 // 0x413630
@@ -503,6 +532,8 @@ static void anim_cleanup()
         return;
     }
 
+    anim_pending_rumble = 0;
+
     for (int index = 0; index < ANIMATION_SEQUENCE_LIST_CAPACITY; index++) {
         anim_set[index].flags &= ~(ANIM_SEQ_ACCUMULATING | ANIM_SEQ_0x10);
     }
@@ -532,6 +563,11 @@ int check_registry(Object* obj)
     if (curr_anim_counter >= ANIMATION_DESCRIPTION_LIST_CAPACITY) {
         return -1;
     }
+
+    // Every register_* call checks here before filling in the step at
+    // curr_anim_counter, so that step takes the pending rumble cue.
+    anim_set[curr_anim_set].animations[curr_anim_counter].rumble = anim_pending_rumble;
+    anim_pending_rumble = 0;
 
     if (obj == NULL) {
         return 0;
@@ -1444,6 +1480,10 @@ static int anim_set_check(int animationSequenceIndex)
         }
 
         AnimationDescription* animationDescription = &(animationSequence->animations[animationSequence->field_0++]);
+
+        if (animationDescription->rumble != 0) {
+            rumble_play_cue(animationDescription->rumble);
+        }
 
         int rc;
         Rect rect;

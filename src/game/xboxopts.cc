@@ -38,13 +38,14 @@ namespace fallout {
 //   | [knob] EDGE SCRL |         sensitivity       |
 //   | [knob] SWAP      +---------------------------+
 //   |                  | SAFE AREA                 |
+//   |                  | RUMBLE                    |
 //   +------------------+---------------------------+
 //   | DEFAULT  DONE  CANCEL               hints    |
 //   +----------------------------------------------+
 //
 // The left column and the bottom button strip are the Preferences screen's
-// own, in place (its five rotary knob panels); the right column is two
-// copies of its two-slider panel and a one-slider panel cut from it.
+// own, in place (its five rotary knob panels); the right column is three
+// copies of its two-slider panel, the last one 12 px shorter.
 
 #define XO_WIDTH 470
 #define XO_HEIGHT 480
@@ -56,7 +57,12 @@ namespace fallout {
 #define XO_SLIDER_SHIFT 170
 // The second and third slider panels sit this much lower than the first.
 #define XO_SLIDER_GROUP2_DY 148
-#define XO_SLIDER_GROUP3_DY 300
+#define XO_SLIDER_GROUP3_DY 296
+// The third panel leaves out these rows of empty texture under its first
+// slider so it fits above the button strip; its second slider moves up by
+// the cut.
+#define XO_PANEL3_CUT_TOP 70
+#define XO_PANEL3_CUT 12
 #define XO_SLIDER_MIN_X (384 - XO_SLIDER_SHIFT)
 #define XO_SLIDER_SPAN 219
 #define XO_SLIDER_RIGHT (624 - XO_SLIDER_SHIFT)
@@ -93,6 +99,7 @@ typedef enum XboxOptsItem {
     XO_ITEM_RIGHT_DEADZONE,
     XO_ITEM_RIGHT_SENSITIVITY,
     XO_ITEM_SAFE_AREA,
+    XO_ITEM_RUMBLE,
     XO_ITEM_COUNT,
 } XboxOptsItem;
 
@@ -131,7 +138,8 @@ typedef struct XboxOptsSlider {
 static const XboxOptsKnob xo_knobs[XO_KNOB_COUNT] = {
     { "DISPLAY", 4, { "480P", "720P", "720P 1.33X", "720P 1.5X" }, 48, 71 },
     { "PAN CENTERS CURSOR", 2, { "OFF", "ON" }, 125, 149 },
-    { "POINTER ASSIST", 2, { "OFF", "ON" }, 203, 226 },
+    // +RUMBLE: assist plus a tick when the pointer reaches something.
+    { "POINTER ASSIST", 3, { "OFF", "ON", "+RUMBLE" }, 203, 226 },
     { "EDGE SCROLL", 2, { "OFF", "ON" }, 286, 309 },
     { "SWAP STICKS", 2, { "OFF", "ON" }, 363, 387 },
 };
@@ -147,11 +155,12 @@ static const XboxOptsSlider xo_sliders[XO_SLIDER_COUNT] = {
     { "CAMERA DEADZONE", "%d%%", 0, 95, 19 + XO_SLIDER_GROUP2_DY, 50 + XO_SLIDER_GROUP2_DY },
     { "CAMERA SENSITIVITY", "%d", 1, 100, 94 + XO_SLIDER_GROUP2_DY, 125 + XO_SLIDER_GROUP2_DY },
     { "SAFE AREA", "%d%%", 0, 8, 19 + XO_SLIDER_GROUP3_DY, 50 + XO_SLIDER_GROUP3_DY },
+    { "RUMBLE", "%d%%", 0, 100, 94 - XO_PANEL3_CUT + XO_SLIDER_GROUP3_DY, 125 - XO_PANEL3_CUT + XO_SLIDER_GROUP3_DY },
 };
 
 // Defaults written by gconfig_init (gconfig.cc) for a fresh config. DEFAULT
 // leaves the display mode alone.
-static const int xo_default_values[XO_ITEM_COUNT] = { 0, 1, 1, 1, 0, 24, 50, 24, 50, 0 };
+static const int xo_default_values[XO_ITEM_COUNT] = { 0, 1, 1, 1, 0, 24, 50, 24, 50, 0, 100 };
 
 static const char* xo_res_path = "E:\\UDATA\\FALLOUT1\\f1_res.ini";
 
@@ -189,14 +198,17 @@ static void xo_build_background()
     xo_blit(XO_FRM_BACKGROUND, 366, 0, 274, 152, 196, 0);
     xo_blit(XO_FRM_BACKGROUND, 366, 2, 274, 150, 196, XO_SLIDER_GROUP2_DY + 2);
 
-    // ...and a one-slider panel: its top row plus its bottom edge.
-    xo_blit(XO_FRM_BACKGROUND, 366, 0, 274, 90, 196, XO_SLIDER_GROUP3_DY);
-    xo_blit(XO_FRM_BACKGROUND, 366, 138, 274, 14, 196, XO_SLIDER_GROUP3_DY + 90);
+    // ...and a third, without some empty rows under its first slider.
+    xo_blit(XO_FRM_BACKGROUND, 366, 2, 274, XO_PANEL3_CUT_TOP - 2, 196, XO_SLIDER_GROUP3_DY + 2);
+    int cutBottom = XO_PANEL3_CUT_TOP + XO_PANEL3_CUT;
+    xo_blit(XO_FRM_BACKGROUND, 366, cutBottom, 274, 152 - cutBottom, 196, XO_SLIDER_GROUP3_DY + XO_PANEL3_CUT_TOP);
 
     // Plain texture (the title band between the grilles) below it.
-    int fillTop = XO_SLIDER_GROUP3_DY + 104;
-    xo_blit(XO_FRM_BACKGROUND, 60, 0, 250, 440 - fillTop, 196, fillTop);
-    xo_blit(XO_FRM_BACKGROUND, 60, 0, 24, 440 - fillTop, 446, fillTop);
+    int fillTop = XO_SLIDER_GROUP3_DY + 152 - XO_PANEL3_CUT;
+    if (fillTop < 440) {
+        xo_blit(XO_FRM_BACKGROUND, 60, 0, 250, 440 - fillTop, 196, fillTop);
+        xo_blit(XO_FRM_BACKGROUND, 60, 0, 24, 440 - fillTop, 446, fillTop);
+    }
 
     // Bottom: the button strip with its three plates, where the Preferences
     // screen has it, plus plain texture to the right of it.
@@ -292,17 +304,16 @@ static void xo_draw()
     xo_text("DONE", 169, 449, normal);
     xo_text("CANCEL", 283, 449, normal);
 
-    // Controller hints in the empty corner.
+    // Controller hints in the empty corner, or a restart warning while a
+    // display setting is selected.
     text_font(101);
     const char* hints[2] = { "START: DONE", "BACK: CANCEL" };
+    if (xo_selected == XO_ITEM_DISPLAY || xo_selected == XO_ITEM_SAFE_AREA) {
+        hints[0] = "CHANGING THIS";
+        hints[1] = "RESTARTS GAME";
+    }
     for (int index = 0; index < 2; index++) {
         xo_text(hints[index], 460 - text_width(hints[index]), 448 + index * (text_height() + 2), normal);
-    }
-
-    // Display changes need a restart; say so under the sliders.
-    const char* notes[2] = { "DISPLAY AND SAFE AREA", "RESTART THE GAME" };
-    for (int index = 0; index < 2; index++) {
-        xo_text(notes[index], 196 + (274 - text_width(notes[index])) / 2, XO_SLIDER_GROUP3_DY + 110 + index * (text_height() + 2), normal);
     }
 
     win_draw(xo_win);
@@ -322,6 +333,13 @@ static void xo_set_value(int item, int value)
         if (item < XO_FIRST_SLIDER) {
             // The Preferences knob click.
             gsound_play_sfx_file("ib2p1xx1");
+        }
+
+        // Let the player feel what they picked.
+        if (item == XO_ITEM_RUMBLE) {
+            GamepadRumbleAtStrength(0.6f, 0.3f, 150, value);
+        } else if (item == XO_ITEM_POINTER_ASSIST && value == 2) {
+            GamepadPointerHapticTick(xo_values[XO_ITEM_RUMBLE]);
         }
     }
 }
@@ -394,6 +412,8 @@ static void xo_load_values()
     xo_values[XO_ITEM_RIGHT_DEADZONE] = 20;
     xo_values[XO_ITEM_LEFT_SENSITIVITY] = 50;
     xo_values[XO_ITEM_RIGHT_SENSITIVITY] = 50;
+    xo_values[XO_ITEM_RUMBLE] = xo_default_values[XO_ITEM_RUMBLE];
+    int pointerHaptics = 0;
 
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_CENTER_CURSOR_KEY, &(xo_values[XO_ITEM_CENTER_CURSOR]));
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_ASSIST_KEY, &(xo_values[XO_ITEM_POINTER_ASSIST]));
@@ -403,10 +423,16 @@ static void xo_load_values()
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_DEADZONE_KEY, &(xo_values[XO_ITEM_RIGHT_DEADZONE]));
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY, &(xo_values[XO_ITEM_LEFT_SENSITIVITY]));
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_SENSITIVITY_KEY, &(xo_values[XO_ITEM_RIGHT_SENSITIVITY]));
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RUMBLE_KEY, &(xo_values[XO_ITEM_RUMBLE]));
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_HAPTICS_KEY, &pointerHaptics);
 
     // Clamp whatever the config held into the controls' ranges.
     for (int item = XO_ITEM_CENTER_CURSOR; item < XO_KNOB_COUNT; item++) {
         xo_values[item] = xo_values[item] != 0 ? 1 : 0;
+    }
+    // POINTER ASSIST: OFF, ON, ON with the haptic tick.
+    if (xo_values[XO_ITEM_POINTER_ASSIST] != 0 && pointerHaptics != 0) {
+        xo_values[XO_ITEM_POINTER_ASSIST] = 2;
     }
     for (int index = 0; index < XO_SLIDER_COUNT; index++) {
         const XboxOptsSlider* slider = &(xo_sliders[index]);
@@ -418,6 +444,7 @@ static void xo_load_values()
 // Returns true if the game must relaunch for new display settings.
 static bool xo_save_values(int initialDisplay, int initialSafeArea)
 {
+    debug_printf("Saving Xbox options: rumble=%d\n", xo_values[XO_ITEM_RUMBLE]);
     debug_printf("Saving Xbox options: display=%d safe_area=%d center_cursor=%d pointer_assist=%d edge_scroll=%d swap_sticks=%d left_deadzone=%d left_sensitivity=%d right_deadzone=%d right_sensitivity=%d\n",
         xo_values[XO_ITEM_DISPLAY],
         xo_values[XO_ITEM_SAFE_AREA],
@@ -435,7 +462,9 @@ static bool xo_save_values(int initialDisplay, int initialSafeArea)
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY, xo_values[XO_ITEM_LEFT_SENSITIVITY]);
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_SENSITIVITY_KEY, xo_values[XO_ITEM_RIGHT_SENSITIVITY]);
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_CENTER_CURSOR_KEY, xo_values[XO_ITEM_CENTER_CURSOR]);
-    config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_ASSIST_KEY, xo_values[XO_ITEM_POINTER_ASSIST]);
+    config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_ASSIST_KEY, xo_values[XO_ITEM_POINTER_ASSIST] != 0 ? 1 : 0);
+    config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_HAPTICS_KEY, xo_values[XO_ITEM_POINTER_ASSIST] == 2 ? 1 : 0);
+    config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RUMBLE_KEY, xo_values[XO_ITEM_RUMBLE]);
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_EDGE_SCROLL_KEY, xo_values[XO_ITEM_EDGE_SCROLL]);
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_SWAP_STICKS_KEY, xo_values[XO_ITEM_SWAP_STICKS]);
 
