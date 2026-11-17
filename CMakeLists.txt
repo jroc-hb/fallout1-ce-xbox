@@ -197,6 +197,8 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/game/worldmap_walkmask.h"
     "src/game/worldmap.cc"
     "src/game/worldmap.h"
+    "src/game/xboxopts.cc"
+    "src/game/xboxopts.h"
     "src/int/audio.cc"
     "src/int/audio.h"
     "src/int/audiof.cc"

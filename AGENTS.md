@@ -164,13 +164,24 @@ Run them from WSL with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File 
 
 All Xbox code is behind `#ifdef NXDK` / `XBOX`. The files with the most Xbox-specific code:
 `src/plib/gnw/svga.cc` (renderer), `src/game/loadsave.cc` (UDATA save slots),
-`src/platform_compat.cc` (paths/FS), `src/game/mainmenu.cc` (XBOX OPTS menu),
+`src/platform_compat.cc` (paths/FS), `src/game/mainmenu.cc` (XBOX OPTS button),
+`src/game/xboxopts.cc` (XBOX OPTS screen),
 `src/plib/gnw/gamepad.cc`, `src/plib/gnw/winmain.cc` (startup/mounts), `src/audio_engine.cc`.
 
 SDL-created threads on nxdk-sdl3 get very small stacks (about 4 KB), so keep large buffers off them.
 
+**XBOX OPTS screen** (`xboxopts.cc`). It is pieced together from the Preferences screen art
+(`PREFSCRN.FRM`, interface fid 240) so it matches the game: the left column's rotary-knob panels
+(`PRFBKNBS.FRM`, 46x47 frames stacked) plus the `PREFCVR.FRM` cover plate, two copies of the
+right column's two-slider panel (`PRFSLDOF/ON.FRM` knobs), and the bottom button strip with
+`LILREDUP/DN.FRM`. Coordinates are the Preferences screen's (`options.cc` `btndat`, `UpdateThing`),
+shifted as noted in the file. D-pad up/down selects, left/right changes, START (sent as Escape)
+applies, BACK (`b`) cancels; the mouse works on the knobs, sliders and buttons too.
+- `f1_res.ini` resolution and `fallout.cfg` `[control]` keys are what it edits. Changing the
+  resolution relaunches `default.xbe`.
+
 **Video mode / resolution.**
-- `f1_res.ini` lives at `E:\UDATA\FALLOUT1` and is written by the XBOX OPTS menu (`main.cc`). It
+- `f1_res.ini` lives at `E:\UDATA\FALLOUT1` and is written by the XBOX OPTS screen (`xboxopts.cc`). It
   sets `SCR_WIDTH`/`SCR_HEIGHT`.
 - `svga_init` creates the SDL window at that size **without `SDL_WINDOW_FULLSCREEN`**. With that
   flag, SDL3 swaps in the display bounds, and the nxdk driver's primary display is 640×480, so 720p
@@ -253,7 +264,7 @@ engine's 32x24 px scroll steps.
   view (PS4 Planescape-style), so the hex cursor lands on the center hex when the camera stops. It
   skips this while map scrolling is disabled (dialogue, enemy turns, loading) or when another
   window covers the screen center (inventory, Pip-Boy). The left stick still moves the pointer.
-  The lock is optional: XBOX OPTS "Right stick centers cursor" sets `[control]
+  The lock is optional: XBOX OPTS "PAN CENTERS CURSOR" sets `[control]
   right_stick_center_cursor` in `fallout.cfg` (default 1). With it off the pan cursor still shows,
   wherever the pointer is.
 - `GamepadInit()` (which reads the `[control]` stick settings) used to run only on APPLY in XBOX
