@@ -1092,10 +1092,6 @@ void GNW95_process_message()
     // is disabled, because if we ignore it, we'll never be able to reactivate
     // it again.
     
-    ProcessTriggers();
-    ProcessLeftStick();
-    ProcessRightStick();
-
     KeyboardData keyboardData;
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
@@ -1165,6 +1161,12 @@ void GNW95_process_message()
             break;
         }
     }
+
+    // After the event loop, so the sticks and triggers use this frame's
+    // positions rather than last frame's (one frame less input lag).
+    ProcessTriggers();
+    ProcessLeftStick();
+    ProcessRightStick();
 
     touch_process_gesture();
 

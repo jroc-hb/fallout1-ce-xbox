@@ -82,6 +82,9 @@ void intensity_mask_buf_to_buf(unsigned char* src, int srcWidth, int srcHeight, 
 int obj_outline_object(Object* obj, int a2, Rect* rect);
 int obj_remove_outline(Object* obj, Rect* rect);
 int obj_intersects_with(Object* object, int x, int y);
+// Fills `objects` with up to `capacity` objects on `elevation` standing within
+// `radius` hexes of `tile`; returns how many.
+int obj_list_near_tile(int tile, int radius, int elevation, Object** objects, int capacity);
 int obj_create_intersect_list(int x, int y, int elevation, int objectType, ObjectWithFlags** entriesPtr);
 void obj_delete_intersect_list(ObjectWithFlags** a1);
 void obj_set_seen(int tile);

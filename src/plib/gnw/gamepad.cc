@@ -10,6 +10,7 @@
 #include "plib/gnw/dxinput.h"
 #include "plib/gnw/input.h"
 #include "game/gconfig.h"
+#include "game/gmouse.h"
 #include "game/map.h"
 
 // Based on glebm's initial mouse support PR https://github.com/alexbatalov/fallout1-ce/pull/118
@@ -21,8 +22,9 @@ namespace fallout {
 // Sensitivity: user-facing 1-100 scale where 50 is the default and higher means faster.
 //   Converted at init to an internal divisor — see GamepadInit.
 //
-// Left stick default (40): maps to internal divisor 2.0. Linear input — stick
-//   deflection maps directly to cursor speed, uniform in all directions.
+// Left stick (default 40): moves the pointer at up to 10 * sensitivity px/s
+//   at 640x480 (scaled up for bigger screens, see ProcessLeftStick), through a
+//   response curve so small deflections give fine control.
 //
 // Right stick default (40): maps to internal divisor 62.5.
 //   Pans the map smoothly at stickValue * (32 px per divisor ms) across and
@@ -35,9 +37,13 @@ static int gRightStickSensitivity     = 40;
 // When set, panning with the right stick locks the pointer to the middle of
 // the map view (XBOX OPTS menu, [control] right_stick_center_cursor).
 static bool gRightStickCenterCursor   = true;
+// Slow the pointer over clickable things and bend it toward them
+// (XBOX OPTS, [control] pointer_assist).
+static bool gPointerAssist            = true;
 
 // Internal divisors derived from the 1-100 sensitivity values in GamepadInit.
-static float gLeftStickInternalDivisor  = 2.0f;
+// Pointer speed at full deflection, in 640x480 pixels per second.
+static float gLeftStickPixelsPerSecond  = 400.0f;
 static float gRightStickInternalDivisor = 50.0f;
 
 // Simulated mouse state using gamepad inputs
@@ -122,9 +128,6 @@ void ReleaseChordKey()
     // [-32767.0..+32767.0] -> [-1.0..1.0]
     void ScaleJoystickAxes(float* x, float* y, float deadzone)
     {
-        if (deadzone == 0) {
-            return;
-        }
         if (deadzone >= 1.0) {
             *x = 0;
             *y = 0;
@@ -137,7 +140,8 @@ void ReleaseChordKey()
         float deadZone = deadzone * maximum;
 
         float magnitude = std::sqrt(analogX * analogX + analogY * analogY);
-        if (magnitude >= deadZone) {
+        // Rescale [deadzone..max] to [0..1], keeping the direction.
+        if (magnitude > deadZone && magnitude > 0.0f) {
             float scalingFactor = 1.F / magnitude * (magnitude - deadZone) / (maximum - deadZone);
             analogX = (analogX * scalingFactor);
             analogY = (analogY * scalingFactor);
@@ -178,41 +182,6 @@ void ReleaseChordKey()
         ScaleJoystickAxes(&rightStickX, &rightStickY, rightDeadzone);
     }
 
-    struct LeftStickAccumulator {
-
-        LeftStickAccumulator()
-        {
-            lastTc = SDL_GetTicks();
-            hiresDX = 0;
-            hiresDY = 0;
-        }
-
-        void Pool(int* x, int* y, float slowdown)
-        {
-            const Uint64 tc = SDL_GetTicks();
-            const int dtc = static_cast<int>(tc - lastTc);
-            hiresDX += leftStickX * dtc;
-            hiresDY += leftStickY * dtc;
-            const int dx = static_cast<int>(hiresDX / slowdown);
-            const int dy = static_cast<int>(hiresDY / slowdown);
-            *x += dx;
-            *y -= dy;
-            lastTc = tc;
-            hiresDX -= dx * slowdown;
-            hiresDY -= dy * slowdown;
-        }
-
-        void Clear()
-        {
-            lastTc  = SDL_GetTicks();
-            hiresDX = 0.0f;
-            hiresDY = 0.0f;
-        }
-
-        Uint64 lastTc;
-        float hiresDX;
-        float hiresDY;
-    };
 
 } // namespace
 
@@ -507,6 +476,9 @@ void GamepadInit()
     int centerCursor = gRightStickCenterCursor ? 1 : 0;
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_CENTER_CURSOR_KEY, &centerCursor);
     gRightStickCenterCursor = centerCursor != 0;
+    int pointerAssist = gPointerAssist ? 1 : 0;
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_ASSIST_KEY, &pointerAssist);
+    gPointerAssist = pointerAssist != 0;
 
     // Clamp deadzone to a sane range so a bad config value can't break input.
     gLeftStickDeadzonePercent  = std::max(0, std::min(95, gLeftStickDeadzonePercent));
@@ -517,49 +489,69 @@ void GamepadInit()
 
     // Convert 1-100 user values to internal divisors. 50 == default behaviour.
     // Higher user value = larger divisor at 50, smaller above — i.e. faster.
-    gLeftStickInternalDivisor  = (50.0f / static_cast<float>(gLeftStickSensitivity))  * 2.0f;
+    gLeftStickPixelsPerSecond  = 10.0f * static_cast<float>(gLeftStickSensitivity);
     gRightStickInternalDivisor = (50.0f / static_cast<float>(gRightStickSensitivity)) * 50.0f;
 
-    debug_printf("Gamepad config: left_deadzone=%d%% right_deadzone=%d%% left_sensitivity=%d (divisor=%.2f) right_sensitivity=%d (divisor=%.2f)\n",
+    debug_printf("Gamepad config: left_deadzone=%d%% right_deadzone=%d%% left_sensitivity=%d (px/s=%.2f) right_sensitivity=%d (divisor=%.2f)\n",
         gLeftStickDeadzonePercent, gRightStickDeadzonePercent,
-        gLeftStickSensitivity, gLeftStickInternalDivisor,
+        gLeftStickSensitivity, gLeftStickPixelsPerSecond,
         gRightStickSensitivity, gRightStickInternalDivisor);
-    debug_printf("Gamepad config: center_cursor=%d\n", gRightStickCenterCursor ? 1 : 0);
+    debug_printf("Gamepad config: center_cursor=%d pointer_assist=%d\n", gRightStickCenterCursor ? 1 : 0, gPointerAssist ? 1 : 0);
 }
 
 void ProcessLeftStick()
 {
-    static LeftStickAccumulator acc;
-    if (leftStickX == 0 && leftStickY == 0) {
-        acc.Clear();
+    // Fractional pixels carried over to the next frame.
+    static float remainderX = 0.0f;
+    static float remainderY = 0.0f;
+    static Uint64 lastTicks = 0;
+
+    const Uint64 now = SDL_GetTicksNS();
+    // Cap the step so a stall (loading, a dialog) doesn't fling the pointer.
+    const float dt = std::min(static_cast<float>(now - lastTicks) / 1000000000.0f, 0.05f);
+    lastTicks = now;
+
+    // Deflection past the deadzone, 0..1.
+    const float length = std::sqrt(leftStickX * leftStickX + leftStickY * leftStickY);
+    const float magnitude = std::min(1.0f, length);
+    if (magnitude <= 0.0f) {
+        remainderX = 0.0f;
+        remainderY = 0.0f;
         return;
     }
+
+    // Response curve: mostly quadratic, so half deflection moves at about a
+    // third of full speed for fine aiming, while full deflection is
+    // unchanged. The small linear part keeps a light push from feeling dead.
+    const float curved = 0.2f * magnitude + 0.8f * magnitude * magnitude;
+
+    // Keep the same feel at any resolution: speed scales with the screen's
+    // linear size relative to 640x480 (about 1.73x at 1280x720).
+    const float screenScale = std::sqrt(static_cast<float>(screenGetWidth()) * static_cast<float>(screenGetHeight()) / (640.0f * 480.0f));
 
     // Left trigger acts as an analog speed brake.
     // At 0% trigger: full speed (multiplier 1.0).
     // At 100% trigger: quarter speed (multiplier 0.25).
     const float speedMult = 1.0f - gLeftTriggerValue * 0.75f;
 
-    const float savedX = leftStickX;
-    const float savedY = leftStickY;
-    leftStickX *= speedMult;
-    leftStickY *= speedMult;
+    const float pixels = curved * gLeftStickPixelsPerSecond * screenScale * speedMult * dt;
+    float moveX = leftStickX / length * pixels;
+    float moveY = -leftStickY / length * pixels;
 
-    float relX, relY;
-    SDL_GetRelativeMouseState(&relX, &relY);
-    const int x = static_cast<int>(relX);
-    const int y = static_cast<int>(relY);
-    int newX = x;
-    int newY = y;
-    acc.Pool(&newX, &newY, gLeftStickInternalDivisor);
-
-    leftStickX = savedX;
-    leftStickY = savedY;
-
-    if (newX != x || newY != y) {
-        gLeftStickDeltaX += (newX - x);
-        gLeftStickDeltaY += (newY - y);
+    if (gPointerAssist) {
+        gmouse_pointer_assist(&moveX, &moveY);
     }
+
+    remainderX += moveX;
+    remainderY += moveY;
+
+    const int dx = static_cast<int>(remainderX);
+    const int dy = static_cast<int>(remainderY);
+    remainderX -= static_cast<float>(dx);
+    remainderY -= static_cast<float>(dy);
+
+    gLeftStickDeltaX += dx;
+    gLeftStickDeltaY += dy;
 }
 
 void ProcessRightStick()

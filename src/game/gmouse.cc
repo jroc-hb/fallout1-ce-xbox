@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <cmath>
+
 #include "game/actions.h"
 #include "game/art.h"
 #include "game/combat.h"
@@ -2579,5 +2581,170 @@ void gameMouseRefreshImmediately()
 
     renderPresent();
 }
+
+#ifdef NXDK
+// Pointer assist tuning. Sprites are drawn 1:1 at every resolution, so these
+// are plain screen pixels.
+#define POINTER_ASSIST_RADIUS 40 // how far from an object's bounds it pulls
+#define POINTER_ASSIST_HEX_RADIUS 8 // search radius around the pointer's hex
+#define POINTER_ASSIST_FRICTION 0.45f // speed multiplier over a target
+#define POINTER_ASSIST_STEER 0.8f // how hard the path bends at the edge
+#define POINTER_ASSIST_MAX_OBJECTS 256
+
+// Whether the pointer assist should consider `obj` in the current mode.
+static bool gmouse_pointer_assist_wants(Object* obj)
+{
+    if ((obj->flags & OBJECT_HIDDEN) != 0) {
+        return false;
+    }
+
+    int type = FID_TYPE(obj->fid);
+    bool skillMode = gmouse_3d_current_mode >= FIRST_GAME_MOUSE_MODE_SKILL;
+
+    if (obj == obj_dude) {
+        // Only for healing yourself.
+        return gmouse_3d_current_mode == GAME_MOUSE_MODE_USE_FIRST_AID
+            || gmouse_3d_current_mode == GAME_MOUSE_MODE_USE_DOCTOR;
+    }
+
+    switch (gmouse_3d_current_mode) {
+    case GAME_MOUSE_MODE_CROSSHAIR:
+        // Attacking: living critters only.
+        return type == OBJ_TYPE_CRITTER
+            && (obj->data.critter.combat.results & (DAM_KNOCKED_OUT | DAM_DEAD)) == 0;
+    case GAME_MOUSE_MODE_ARROW:
+    case GAME_MOUSE_MODE_USE_CROSSHAIR:
+        break;
+    default:
+        if (!skillMode) {
+            return false;
+        }
+        break;
+    }
+
+    switch (type) {
+    case OBJ_TYPE_CRITTER:
+        return true;
+    case OBJ_TYPE_ITEM:
+        return true;
+    case OBJ_TYPE_SCENERY:
+        return proto_action_can_use(obj->pid);
+    }
+
+    return false;
+}
+
+void gmouse_pointer_assist(float* dx, float* dy)
+{
+    if (!gmouse_initialized || !gmouse_enabled || gmouse_mapper_mode != 0) {
+        return;
+    }
+
+    // Only where the 3D cursor picks objects: not walking, not in menus,
+    // dialogue or while the camera pans.
+    if (gmouse_3d_current_mode == GAME_MOUSE_MODE_MOVE || !gmouse_3d_is_on()) {
+        return;
+    }
+
+    if (!gmouse_scrolling_is_enabled() || map_pixel_scrolling()) {
+        return;
+    }
+
+    int mouseX;
+    int mouseY;
+    mouse_get_position(&mouseX, &mouseY);
+    if (win_get_top_win(mouseX, mouseY) != display_win) {
+        return;
+    }
+
+    int tile = tile_num(mouseX, mouseY, map_elevation);
+    if (tile == -1) {
+        return;
+    }
+
+    static Object* objects[POINTER_ASSIST_MAX_OBJECTS];
+    int count = obj_list_near_tile(tile, POINTER_ASSIST_HEX_RADIUS, map_elevation, objects, POINTER_ASSIST_MAX_OBJECTS);
+
+    bool over = false;
+    int bestDistance = POINTER_ASSIST_RADIUS + 1;
+    int targetX = 0;
+    int targetY = 0;
+
+    for (int index = 0; index < count; index++) {
+        Object* obj = objects[index];
+        if (!gmouse_pointer_assist_wants(obj)) {
+            continue;
+        }
+
+        Rect rect;
+        obj_bound(obj, &rect);
+        if (rect.lrx <= rect.ulx || rect.lry <= rect.uly) {
+            continue;
+        }
+
+        int centerX = (rect.ulx + rect.lrx) / 2;
+        int centerY = (rect.uly + rect.lry) / 2;
+
+        // Skip things hidden under a roof, as object_under_mouse does.
+        if (square_roof_intersect(centerX, centerY, map_elevation)
+            && obj_intersects_with(obj_egg, centerX, centerY) == 0) {
+            continue;
+        }
+
+        // Distance from the pointer to the bounds (0 inside).
+        int outX = std::max(std::max(rect.ulx - mouseX, mouseX - rect.lrx), 0);
+        int outY = std::max(std::max(rect.uly - mouseY, mouseY - rect.lry), 0);
+        int distance = (int)std::sqrt((float)(outX * outX + outY * outY));
+
+        if (distance == 0 && obj_intersects_with(obj, mouseX, mouseY) != 0) {
+            over = true;
+        }
+
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            targetX = centerX;
+            targetY = centerY;
+        }
+    }
+
+    // Friction: slow down over something you can click, so it is easy to
+    // stop on.
+    if (over) {
+        *dx *= POINTER_ASSIST_FRICTION;
+        *dy *= POINTER_ASSIST_FRICTION;
+        return;
+    }
+
+    if (bestDistance > POINTER_ASSIST_RADIUS) {
+        return;
+    }
+
+    // Magnetism: when heading roughly toward a nearby target, bend the path
+    // toward its center without changing speed. Moving away is never
+    // resisted.
+    float speed = std::sqrt(*dx * *dx + *dy * *dy);
+    float toX = (float)(targetX - mouseX);
+    float toY = (float)(targetY - mouseY);
+    float toLength = std::sqrt(toX * toX + toY * toY);
+    if (speed <= 0.0f || toLength <= 0.0f) {
+        return;
+    }
+
+    float dirX = *dx / speed;
+    float dirY = *dy / speed;
+    toX /= toLength;
+    toY /= toLength;
+    if (dirX * toX + dirY * toY < 0.25f) {
+        return;
+    }
+
+    float strength = POINTER_ASSIST_STEER * (1.0f - (float)bestDistance / (float)(POINTER_ASSIST_RADIUS + 1));
+    float bentX = dirX + toX * strength;
+    float bentY = dirY + toY * strength;
+    float bentLength = std::sqrt(bentX * bentX + bentY * bentY);
+    *dx = bentX / bentLength * speed;
+    *dy = bentY / bentLength * speed;
+}
+#endif
 
 } // namespace fallout

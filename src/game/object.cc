@@ -1689,6 +1689,37 @@ int obj_dec_rotation(Object* obj, Rect* dirtyRect)
     return obj_set_rotation(obj, rotation, dirtyRect);
 }
 
+int obj_list_near_tile(int tile, int radius, int elevation, Object** objects, int capacity)
+{
+    if (tile < 0 || tile >= HEX_GRID_SIZE) {
+        return 0;
+    }
+
+    int count = 0;
+    int centerX = tile % HEX_GRID_WIDTH;
+    int centerY = tile / HEX_GRID_WIDTH;
+    for (int y = std::max(0, centerY - radius); y <= std::min(HEX_GRID_HEIGHT - 1, centerY + radius); y++) {
+        for (int x = std::max(0, centerX - radius); x <= std::min(HEX_GRID_WIDTH - 1, centerX + radius); x++) {
+            int other = y * HEX_GRID_WIDTH + x;
+            if (tile_dist(tile, other) > radius) {
+                continue;
+            }
+
+            for (ObjectListNode* node = objectTable[other]; node != NULL; node = node->next) {
+                if (node->obj->elevation != elevation) {
+                    continue;
+                }
+                if (count == capacity) {
+                    return count;
+                }
+                objects[count++] = node->obj;
+            }
+        }
+    }
+
+    return count;
+}
+
 // 0x47C83C
 void obj_rebuild_all_light()
 {

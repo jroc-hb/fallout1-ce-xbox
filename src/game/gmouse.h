@@ -115,6 +115,13 @@ void gmouse_remove_item_outline(Object* object);
 
 void gameMouseRefreshImmediately();
 
+#ifdef NXDK
+// Analog-stick pointer assist: slows the pointer over things it can act on
+// in the current mode and bends its path toward one it is heading for.
+// (dx, dy) is this frame's pointer movement in pixels, adjusted in place.
+void gmouse_pointer_assist(float* dx, float* dy);
+#endif
+
 } // namespace fallout
 
 #endif /* FALLOUT_GAME_GMOUSE_H_ */

@@ -34,14 +34,14 @@ namespace fallout {
 //   | title            | LEFT STICK  deadzone      |
 //   | [knob] RESOLUTION|             sensitivity   |
 //   | [knob] PAN CURSOR+---------------------------+
-//   | (Vault-Tec cover)| RIGHT STICK deadzone      |
+//   | [knob] ASSIST    | RIGHT STICK deadzone      |
 //   |                  |             sensitivity   |
 //   +------------------+---------------------------+
 //   | DEFAULT  DONE  CANCEL               hints    |
 //   +----------------------------------------------+
 //
-// The left column is the Preferences screen's own (rotary knob panels plus
-// the cover plate it uses for a hidden knob), the right column is two copies
+// The left column is the Preferences screen's own (its first three rotary
+// knob panels), the right column is two copies
 // of its two-slider panel, and the bottom band is its button strip.
 
 #define XO_WIDTH 470
@@ -68,18 +68,18 @@ typedef enum XboxOptsFrm {
     XO_FRM_BACKGROUND, // prefscrn.frm
     XO_FRM_SLIDER_OFF, // prfsldof.frm
     XO_FRM_KNOB, // prfbknbs.frm (4 positions, stacked)
-    XO_FRM_COVER, // prefcvr.frm
     XO_FRM_SLIDER_ON, // prfsldon.frm
     XO_FRM_RED_UP, // lilredup.frm
     XO_FRM_RED_DOWN, // lilreddn.frm
     XO_FRM_COUNT,
 } XboxOptsFrm;
 
-static const int xo_frm_ids[XO_FRM_COUNT] = { 240, 241, 242, 246, 247, 8, 9 };
+static const int xo_frm_ids[XO_FRM_COUNT] = { 240, 241, 242, 247, 8, 9 };
 
 typedef enum XboxOptsItem {
     XO_ITEM_RESOLUTION,
     XO_ITEM_CENTER_CURSOR,
+    XO_ITEM_POINTER_ASSIST,
     XO_ITEM_LEFT_DEADZONE,
     XO_ITEM_LEFT_SENSITIVITY,
     XO_ITEM_RIGHT_DEADZONE,
@@ -88,6 +88,7 @@ typedef enum XboxOptsItem {
 } XboxOptsItem;
 
 #define XO_FIRST_SLIDER XO_ITEM_LEFT_DEADZONE
+#define XO_KNOB_COUNT XO_FIRST_SLIDER
 
 // Button event codes.
 #define XO_EVENT_DONE 504
@@ -111,9 +112,10 @@ typedef struct XboxOptsSlider {
     int knobY;
 } XboxOptsSlider;
 
-static const XboxOptsKnob xo_knobs[2] = {
+static const XboxOptsKnob xo_knobs[XO_KNOB_COUNT] = {
     { "RESOLUTION", { "640X480", "1280X720" }, 48, 71 },
     { "PAN CENTERS CURSOR", { "OFF", "ON" }, 125, 149 },
+    { "POINTER ASSIST", { "OFF", "ON" }, 203, 226 },
 };
 
 static const XboxOptsSlider xo_sliders[4] = {
@@ -124,7 +126,7 @@ static const XboxOptsSlider xo_sliders[4] = {
 };
 
 // Defaults written by gconfig_init (gconfig.cc) for a fresh config.
-static const int xo_default_values[XO_ITEM_COUNT] = { 0, 1, 24, 2, 24, 50 };
+static const int xo_default_values[XO_ITEM_COUNT] = { 0, 1, 1, 24, 2, 24, 50 };
 
 static const char* xo_res_path = "E:\\UDATA\\FALLOUT1\\f1_res.ini";
 
@@ -163,13 +165,9 @@ static void xo_build_background()
     xo_blit(XO_FRM_BACKGROUND, 366, 0, 274, 152, 196, 0);
     xo_blit(XO_FRM_BACKGROUND, 366, 2, 274, 150, 196, 150);
 
-    // The Preferences screen covers a knob panel it doesn't use with this
-    // plate; do the same for the third one. Its right edge is the next
-    // column's gap, which isn't there any more, so leave it off.
-    xo_blit(XO_FRM_COVER, 0, 0, 196, std::min(89, xo_frm_size[XO_FRM_COVER].height), 0, 193);
-
-    // Plain texture (the title band between the grilles) under the cover.
-    xo_blit(XO_FRM_BACKGROUND, 60, 0, 196, 18, 0, 282);
+    // Plain texture (the title band between the grilles) over the top of
+    // the fourth knob panel, which isn't used.
+    xo_blit(XO_FRM_BACKGROUND, 60, 0, 196, 22, 0, 278);
 
     // Bottom: the button strip with its three plates, plus plain texture
     // to the right of it.
@@ -202,7 +200,7 @@ static void xo_draw()
     xo_text(title, std::max(0, (196 - text_width(title)) / 2), 10, normal);
 
     // Knob panels.
-    for (int index = 0; index < 2; index++) {
+    for (int index = 0; index < XO_KNOB_COUNT; index++) {
         const XboxOptsKnob* knob = &(xo_knobs[index]);
         int item = XO_ITEM_RESOLUTION + index;
         int color = item == xo_selected ? highlight : normal;
@@ -344,12 +342,14 @@ static void xo_load_values()
     }
 
     xo_values[XO_ITEM_CENTER_CURSOR] = xo_default_values[XO_ITEM_CENTER_CURSOR];
+    xo_values[XO_ITEM_POINTER_ASSIST] = xo_default_values[XO_ITEM_POINTER_ASSIST];
     xo_values[XO_ITEM_LEFT_DEADZONE] = 20;
     xo_values[XO_ITEM_RIGHT_DEADZONE] = 20;
     xo_values[XO_ITEM_LEFT_SENSITIVITY] = 50;
     xo_values[XO_ITEM_RIGHT_SENSITIVITY] = 50;
 
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_CENTER_CURSOR_KEY, &(xo_values[XO_ITEM_CENTER_CURSOR]));
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_ASSIST_KEY, &(xo_values[XO_ITEM_POINTER_ASSIST]));
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_DEADZONE_KEY, &(xo_values[XO_ITEM_LEFT_DEADZONE]));
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_DEADZONE_KEY, &(xo_values[XO_ITEM_RIGHT_DEADZONE]));
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY, &(xo_values[XO_ITEM_LEFT_SENSITIVITY]));
@@ -357,6 +357,7 @@ static void xo_load_values()
 
     // Clamp whatever the config held into the controls' ranges.
     xo_values[XO_ITEM_CENTER_CURSOR] = xo_values[XO_ITEM_CENTER_CURSOR] != 0 ? 1 : 0;
+    xo_values[XO_ITEM_POINTER_ASSIST] = xo_values[XO_ITEM_POINTER_ASSIST] != 0 ? 1 : 0;
     for (int index = 0; index < 4; index++) {
         const XboxOptsSlider* slider = &(xo_sliders[index]);
         int* value = &(xo_values[XO_FIRST_SLIDER + index]);
@@ -367,9 +368,10 @@ static void xo_load_values()
 // Returns true if the game is relaunching for a new resolution.
 static bool xo_save_values(int initialResolution)
 {
-    debug_printf("Saving Xbox options: resolution=%d center_cursor=%d left_deadzone=%d left_sensitivity=%d right_deadzone=%d right_sensitivity=%d\n",
+    debug_printf("Saving Xbox options: resolution=%d center_cursor=%d pointer_assist=%d left_deadzone=%d left_sensitivity=%d right_deadzone=%d right_sensitivity=%d\n",
         xo_values[XO_ITEM_RESOLUTION],
         xo_values[XO_ITEM_CENTER_CURSOR],
+        xo_values[XO_ITEM_POINTER_ASSIST],
         xo_values[XO_ITEM_LEFT_DEADZONE],
         xo_values[XO_ITEM_LEFT_SENSITIVITY],
         xo_values[XO_ITEM_RIGHT_DEADZONE],
@@ -380,6 +382,7 @@ static bool xo_save_values(int initialResolution)
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_LEFT_STICK_SENSITIVITY_KEY, xo_values[XO_ITEM_LEFT_SENSITIVITY]);
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_SENSITIVITY_KEY, xo_values[XO_ITEM_RIGHT_SENSITIVITY]);
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RIGHT_STICK_CENTER_CURSOR_KEY, xo_values[XO_ITEM_CENTER_CURSOR]);
+    config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_ASSIST_KEY, xo_values[XO_ITEM_POINTER_ASSIST]);
 
     gconfig_save();
     GamepadInit();
@@ -436,7 +439,7 @@ static bool xo_open()
     xo_win_buf = win_get_buf(xo_win);
 
     // Clicking a knob panel flips it; pressing on a slider drags it.
-    for (int index = 0; index < 2; index++) {
+    for (int index = 0; index < XO_KNOB_COUNT; index++) {
         win_register_button(xo_win, 8, xo_knobs[index].labelY - 4, 182, 72, -1, -1, -1, XO_EVENT_ITEM + XO_ITEM_RESOLUTION + index, NULL, NULL, NULL, 0);
     }
     for (int index = 0; index < 4; index++) {

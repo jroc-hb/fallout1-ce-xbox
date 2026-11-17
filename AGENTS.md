@@ -158,6 +158,19 @@ Run them from WSL with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File 
   so every 60 Hz frame is sampled. Then classify the frames offline (Pillow is installed; numpy isn't).
 - Timing-sensitive bugs can vanish under instrumentation. A debug thread polling every 1 ms hid the
   frame-bounce bug completely. Prefer in-memory event rings checked by the existing 1 s watchdog.
+- **Virtual controller (analog input).** ViGEmBus is installed on the Windows host. 
+  `E:\Xbox\Development\XEMU\vigem\pad.ps1` creates a virtual Xbox 360 pad (`ViGEmClient.dll` next to
+  it, x64, taken from the `vgamepad` 0.2.0 PyPI sdist) and reads commands from stdin:
+  `lx|ly|rx|ry <-1..1>`, `lt|rt <0..1>`, `btn <a|b|x|y|lb|rb|back|start|ls|rs|up|down|left|right> <0|1>`,
+  `wait <ms>`, `ramp <axis> <from> <to> <ms>`, `reset`, `quit`. It prints `ready`, then `ok <cmd>`
+  per command. Run it as a background task fed from a file, then append commands to the file:
+  `tail -n +1 -f cmds.txt | powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'E:\Xbox\Development\XEMU\vigem\pad.ps1' > pad.log`.
+  XEMU binds it to port 3 (`xemu.toml` `port3`, an Xbox 360 GUID), and the game sees it as
+  `Original Xbox Controller #2`; it keeps working across XEMU restarts while the server runs.
+  **XEMU passes triggers as digital**: the game only ever receives 0 or 32767 (threshold between
+  0.5 and 0.75), so analog trigger behaviour can't be tested in XEMU. Sticks are fully analog.
+  To measure pointer speed exactly, log the summed `gLeftStickDeltaX/Y` per stick deflection from
+  `ProcessLeftStick` (temporary debug); the 2026-11-16 sweep matched the response curve exactly.
 - `qmp_shot.ps1` does **not** work: xemu's monitor has no `screendump` command. Use `grab.ps1`.
 
 ## Code map (Xbox-specific bits)
@@ -171,8 +184,8 @@ All Xbox code is behind `#ifdef NXDK` / `XBOX`. The files with the most Xbox-spe
 SDL-created threads on nxdk-sdl3 get very small stacks (about 4 KB), so keep large buffers off them.
 
 **XBOX OPTS screen** (`xboxopts.cc`). It is pieced together from the Preferences screen art
-(`PREFSCRN.FRM`, interface fid 240) so it matches the game: the left column's rotary-knob panels
-(`PRFBKNBS.FRM`, 46x47 frames stacked) plus the `PREFCVR.FRM` cover plate, two copies of the
+(`PREFSCRN.FRM`, interface fid 240) so it matches the game: the left column's first three rotary-knob
+panels (`PRFBKNBS.FRM`, 46x47 frames stacked), two copies of the
 right column's two-slider panel (`PRFSLDOF/ON.FRM` knobs), and the bottom button strip with
 `LILREDUP/DN.FRM`. Coordinates are the Preferences screen's (`options.cc` `btndat`, `UpdateThing`),
 shifted as noted in the file. D-pad up/down selects, left/right changes, START (sent as Escape)
@@ -272,6 +285,29 @@ engine's 32x24 px scroll steps.
   after `gconfig_init`. Its first `debug_printf` line is garbled because nxdk's `debug_printf` here
   mishandles `%%` and `%.2f`.
 - XEMU's default keyboard map puts the right stick on I/J/K/L, which is how it was tested.
+
+**Left stick pointer** (`ProcessLeftStick`, gamepad.cc). Full deflection moves the pointer at
+`10 * left_stick_sensitivity` px/s at 640x480, scaled by sqrt(screen area / 640x480) (1.73x at
+720p) so it feels the same in both modes. Deflection goes through a response curve
+(`0.2m + 0.8m^2`) for fine control near the center; LT still brakes to 25%. Timing uses
+`SDL_GetTicksNS` with fractional pixels carried between frames.
+- `GNW95_process_message` runs the stick/trigger processing **after** draining SDL events, so the
+  sticks use this frame's axis values (it used to lag one frame).
+- `ScaleJoystickAxes` used to return raw ±32767 values when the deadzone was 0%, which made a 0%
+  deadzone unusable; it now always normalizes.
+- XEMU's default keyboard map puts the left stick on E/S/D/F (full deflection only, so the curve
+  can't be tested from the keyboard).
+- **Pointer assist** (`gmouse_pointer_assist`, gmouse.cc; XBOX OPTS "POINTER ASSIST",
+  `[control] pointer_assist`, default on). `ProcessLeftStick` passes each frame's movement through
+  it. Only in the map view in ARROW, CROSSHAIR and skill/use modes (not MOVE, not over UI windows,
+  not while panning). It lists objects within 8 hexes of the pointer (`obj_list_near_tile`,
+  object.cc) and keeps the ones the mode can act on (CROSSHAIR: living critters; otherwise
+  critters, ground items, usable scenery; roof-hidden ones skipped). Over one (pixel-exact
+  `obj_intersects_with`) the pointer moves at 45% speed (friction). Within 40 px of one's bounds
+  and moving toward it, the path bends toward its center without changing speed (magnetism);
+  moving away is never resisted. Tuning constants are at the top of the function.
+- The Preferences "Mouse Sensitivity" slider has no effect on Xbox (the scaling in `mouse.cc` is
+  in the non-NXDK branch).
 
 **Gamepad mapping must be registered before `SDL_INIT_JOYSTICK`.** The Original Xbox pad needs the
 game's `default` mapping (`GamepadRegisterDefaultMapping` in `gamepad.cc`). The mapping is set via
