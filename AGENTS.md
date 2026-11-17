@@ -233,15 +233,26 @@ engine's 32x24 px scroll steps.
   speed: one 32x24 step per `gRightStickInternalDivisor` ms at full deflection.
 - Cost in XEMU (2026-11-16, -O2 nxdk + fast pdclib copies): 2.5-4.5 ms average (up to ~9 ms) per
   frame at 720p, mostly the strip redraw. (480p measured ~5 ms before those library fixes.) 720p holds 56-60 fps while panning, so an occasional frame still drops.
-- The hex cursor is hidden while panning (`map_pixel_scrolling()`, checked in `gmouse_bk_process`)
-  and comes back 100 ms after the map stops. It can only sit on whole hexes, so showing it while
-  the map glides under a still mouse made it slide and jump back a hex (a ghosting effect).
+- The real hex cursor is hidden while panning (`map_pixel_scrolling()`, checked in
+  `gmouse_bk_process`) and comes back 100 ms after the map stops. It can only sit on whole hexes,
+  so showing it while the map glides under a still mouse made it slide and jump back a hex. In its
+  place `gmouse_show_pan_cursor` sets the mouse shape to a screen-space copy of it (the hex art
+  plus the outline `obj_render_outline` would draw, in solid dark red since a mouse shape can't
+  blend), built from `obj_mouse_flat`'s current fid. So the hex stays fixed at the center while the
+  map moves. Interface art #1 is blank; the visible hex comes from `obj_mouse_flat->fid`.
+- `gmouse_3d_off` refreshes the hex's art bounds (plus 1 px for the outline), not just the rect
+  `obj_turn_off` returns: that is the object's light area and needn't cover the hex, which left
+  hex fragments in the map buffer for the scroll to carry along.
 - Strip redraws were dominated by `obj_render_pre_roof`: it visits every object within 320x240 px
   of the strip and `obj_render_object` locked each one's art just to find it doesn't overlap.
   `Object` now caches its last drawn bounds relative to its tile (`renderBounds*`, keyed on fid,
   frame, rotation and x/y offset, runtime only) for an early reject. That cut object drawing
   per strip from ~1.5 ms to ~0.2 ms at 480p. Any new code that allocates an `Object` without
   zeroing it must set `renderBoundsValid = false`.
+- While the right stick is deflected, `map_center_mouse()` locks the pointer to the center of the map
+  view (PS4 Planescape-style), so the hex cursor lands on the center hex when the camera stops. It
+  skips this while map scrolling is disabled (dialogue, enemy turns, loading) or when another
+  window covers the screen center (inventory, Pip-Boy). The left stick still moves the pointer.
 - XEMU's default keyboard map puts the right stick on I/J/K/L, which is how it was tested.
 
 **Gamepad mapping must be registered before `SDL_INIT_JOYSTICK`.** The Original Xbox pad needs the

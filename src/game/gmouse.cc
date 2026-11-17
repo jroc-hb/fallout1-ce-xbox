@@ -24,6 +24,7 @@
 #include "plib/gnw/gnw.h"
 #include "plib/gnw/grbuf.h"
 #include "plib/gnw/input.h"
+#include "plib/gnw/memory.h"
 #include "plib/gnw/rect.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
@@ -64,6 +65,16 @@ static int gmouse_scrolling_enabled = 1;
 
 // 0x50526C
 static int gmouse_current_cursor = MOUSE_CURSOR_NONE;
+
+// Screen-space copy of the hex cursor outline, used as the mouse shape while
+// the right stick pans the map (see map_pixel_scrolling). The real hex cursor
+// is an object on a tile, so it can't stay still while the map glides under
+// the pointer.
+static unsigned char* gmouse_pan_cursor_data = NULL;
+static int gmouse_pan_cursor_width = 0;
+static int gmouse_pan_cursor_height = 0;
+static int gmouse_pan_cursor_fid = -1;
+static bool gmouse_pan_cursor_shown = false;
 
 // 0x505270
 static CacheEntry* gmouse_current_cursor_key = INVALID_CACHE_ENTRY;
@@ -367,6 +378,128 @@ void gmouse_exit()
     gmouse_enabled = 0;
     gmouse_initialized = false;
     gmouse_current_cursor = -1;
+
+    if (gmouse_pan_cursor_data != NULL) {
+        mem_free(gmouse_pan_cursor_data);
+        gmouse_pan_cursor_data = NULL;
+    }
+    gmouse_pan_cursor_fid = -1;
+    gmouse_pan_cursor_shown = false;
+}
+
+// Builds gmouse_pan_cursor_data from the hex cursor's current art: the
+// outline obj_render_outline draws around it, with a 1 px border for the
+// outline. The real outline is blended with the floor; a mouse shape can't
+// blend, so it uses the darker red the blend mostly comes out as.
+static bool gmouse_build_pan_cursor()
+{
+    int fid = obj_mouse_flat->fid;
+
+    CacheEntry* handle;
+    Art* art = art_ptr_lock(fid, &handle);
+    if (art == NULL) {
+        return false;
+    }
+
+    int artWidth = art_frame_width(art, 0, 0);
+    int artHeight = art_frame_length(art, 0, 0);
+    unsigned char* src = art_frame_data(art, 0, 0);
+
+    int width = artWidth + 2;
+    int height = artHeight + 2;
+    unsigned char* data = (unsigned char*)mem_malloc(width * height);
+    if (data == NULL) {
+        art_ptr_unlock(handle);
+        return false;
+    }
+
+    memset(data, 0, width * height);
+
+    unsigned char color = colorTable[18 << 10];
+
+    // The art itself (a hex ring), as obj_render_object draws it. Art (x, y)
+    // is data (x+1, y+1).
+    for (int y = 0; y < artHeight; y++) {
+        for (int x = 0; x < artWidth; x++) {
+            data[(y + 1) * width + x + 1] = src[y * artWidth + x];
+        }
+    }
+
+    // Plus the transparent pixel on each side of every run of opaque pixels,
+    // across and down, like obj_render_outline.
+    for (int y = 0; y < artHeight; y++) {
+        bool inside = false;
+        for (int x = 0; x <= artWidth; x++) {
+            bool opaque = x < artWidth && src[y * artWidth + x] != 0;
+            if (opaque != inside) {
+                data[(y + 1) * width + (opaque ? x : x + 1)] = color;
+                inside = opaque;
+            }
+        }
+    }
+
+    for (int x = 0; x < artWidth; x++) {
+        bool inside = false;
+        for (int y = 0; y <= artHeight; y++) {
+            bool opaque = y < artHeight && src[y * artWidth + x] != 0;
+            if (opaque != inside) {
+                data[(opaque ? y : y + 1) * width + x + 1] = color;
+                inside = opaque;
+            }
+        }
+    }
+
+    art_ptr_unlock(handle);
+
+    if (gmouse_pan_cursor_data != NULL) {
+        mem_free(gmouse_pan_cursor_data);
+    }
+
+    gmouse_pan_cursor_data = data;
+    gmouse_pan_cursor_fid = fid;
+    gmouse_pan_cursor_width = width;
+    gmouse_pan_cursor_height = height;
+    return true;
+}
+
+// Shows the hex outline as the mouse shape, centered on the pointer.
+static void gmouse_show_pan_cursor()
+{
+    if (gmouse_pan_cursor_shown) {
+        return;
+    }
+
+    if ((gmouse_pan_cursor_data == NULL || gmouse_pan_cursor_fid != obj_mouse_flat->fid)
+        && !gmouse_build_pan_cursor()) {
+        return;
+    }
+
+    if (mouse_set_shape(gmouse_pan_cursor_data,
+            gmouse_pan_cursor_width,
+            gmouse_pan_cursor_height,
+            gmouse_pan_cursor_width,
+            gmouse_pan_cursor_width / 2,
+            gmouse_pan_cursor_height / 2,
+            0)
+        == 0) {
+        gmouse_pan_cursor_shown = true;
+    }
+}
+
+// Puts back the shape of the current game cursor.
+static void gmouse_hide_pan_cursor()
+{
+    if (!gmouse_pan_cursor_shown) {
+        return;
+    }
+
+    int cursor = gmouse_current_cursor;
+
+    // gmouse_set_cursor ignores a request for the cursor already set.
+    gmouse_current_cursor = -1;
+    if (gmouse_set_cursor(cursor) != 0) {
+        gmouse_current_cursor = cursor;
+    }
 }
 
 // 0x443044
@@ -622,11 +755,16 @@ void gmouse_bk_process()
         return;
     }
 
-    // Keep the hex cursor hidden while the right stick pans the map (see
-    // map_pixel_scrolling).
+    // While the right stick pans the map, show a screen-space copy of the hex
+    // cursor at the pointer instead of the real one (see map_pixel_scrolling).
     if (map_pixel_scrolling()) {
+        if (gmouse_current_cursor == MOUSE_CURSOR_NONE) {
+            gmouse_show_pan_cursor();
+        }
         return;
     }
+
+    gmouse_hide_pan_cursor();
 
     // NOTE: Strange set of conditions and jumps. Not sure about this one.
     switch (gmouse_current_cursor) {
@@ -1260,6 +1398,7 @@ int gmouse_set_cursor(int cursor)
 
     gmouse_current_cursor = cursor;
     gmouse_current_cursor_key = mouseCursorFrmHandle;
+    gmouse_pan_cursor_shown = false;
 
     return 0;
 }
@@ -1542,22 +1681,46 @@ void gmouse_3d_off()
 
     int v1 = 0;
 
+    // CE: obj_turn_off reports the area the object lights, which needn't
+    // cover the object itself, so take the bounds while they're visible.
+    Rect bounds1;
+    Rect bounds2;
+    obj_bound(obj_mouse, &bounds1);
+    obj_bound(obj_mouse_flat, &bounds2);
+
     Rect rect1;
     if (obj_turn_off(obj_mouse, &rect1) == 0) {
+        rect_min_bound(&rect1, &bounds1, &rect1);
         v1 |= 1;
     }
 
     Rect rect2;
     if (obj_turn_off(obj_mouse_flat, &rect2) == 0) {
+        rect_min_bound(&rect2, &bounds2, &rect2);
         v1 |= 2;
     }
 
+    // CE: The hex cursor's outline is drawn 1 px outside its bounds, so
+    // grow the refreshed area to erase it too. Otherwise smooth scrolling
+    // carries the leftover pixels along with the map.
     if (v1 == 1) {
+        rect1.ulx--;
+        rect1.uly--;
+        rect1.lrx++;
+        rect1.lry++;
         tile_refresh_rect(&rect1, map_elevation);
     } else if (v1 == 2) {
+        rect2.ulx--;
+        rect2.uly--;
+        rect2.lrx++;
+        rect2.lry++;
         tile_refresh_rect(&rect2, map_elevation);
     } else if (v1 == 3) {
         rect_min_bound(&rect1, &rect2, &rect1);
+        rect1.ulx--;
+        rect1.uly--;
+        rect1.lrx++;
+        rect1.lry++;
         tile_refresh_rect(&rect1, map_elevation);
     }
 }

@@ -39,6 +39,7 @@
 #include "plib/gnw/input.h"
 #include "plib/gnw/intrface.h"
 #include "plib/gnw/memory.h"
+#include "plib/gnw/mouse.h"
 #include "plib/gnw/svga.h"
 
 namespace fallout {
@@ -820,6 +821,34 @@ int map_scroll(int dx, int dy)
     win_draw(display_win);
 
     return 0;
+}
+
+// Moves the mouse to the center of the map view, so the right stick pans
+// around a fixed pointer. Does nothing while map scrolling is disabled
+// (dialogue, enemy turns, loading) or when something else covers the center
+// of the screen (inventory, Pip-Boy and other windows).
+void map_center_mouse()
+{
+    if (!gmouse_scrolling_is_enabled()) {
+        return;
+    }
+
+    int x = (scr_size.lrx - scr_size.ulx + 1) / 2;
+    int y = (scr_size.lry - scr_size.uly - 99) / 2;
+    if (win_get_top_win(x, y) != display_win) {
+        return;
+    }
+
+    int mouseX;
+    int mouseY;
+    mouse_get_position(&mouseX, &mouseY);
+    if (mouseX == x && mouseY == y) {
+        return;
+    }
+
+    mouse_hide();
+    mouse_set_position(x, y);
+    mouse_show();
 }
 
 // Whether map_scroll_pixels moved the map in the last 100 ms. The hex cursor

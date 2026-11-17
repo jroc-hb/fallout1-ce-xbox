@@ -573,6 +573,10 @@ void ProcessRightStick()
         return;
     }
 
+    // Pan around a pointer locked to the middle of the screen, so the hex
+    // cursor lands on the center hex when the camera stops.
+    map_center_mouse();
+
     // Same speed as the stepped scrolling this replaced: one 32x24 px scroll
     // step per divisor ms at full deflection. Positive stick Y scrolls up, as
     // before.
