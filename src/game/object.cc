@@ -1099,6 +1099,11 @@ int obj_disconnect(Object* obj, Rect* rect)
         return -1;
     }
 
+#ifdef NXDK
+    // Picked up or moved into an inventory.
+    gmouse_forget_target(obj);
+#endif
+
     ObjectListNode* node;
     ObjectListNode* prev_node;
     if (obj_node_ptr(obj, &node, &prev_node) != 0) {
@@ -1999,6 +2004,9 @@ int obj_erase_object(Object* object, Rect* rect)
     }
 
     gmouse_remove_item_outline(object);
+#ifdef NXDK
+    gmouse_forget_target(object);
+#endif
 
     ObjectListNode* node;
     ObjectListNode* previousNode;

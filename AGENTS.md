@@ -171,6 +171,9 @@ Run them from WSL with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File 
   0.5 and 0.75), so analog trigger behaviour can't be tested in XEMU. Sticks are fully analog.
   To measure pointer speed exactly, log the summed `gLeftStickDeltaX/Y` per stick deflection from
   `ProcessLeftStick` (temporary debug); the 2026-11-16 sweep matched the response curve exactly.
+- `keys.ps1 -Keys 'up,wait500,a,holde:300'` focuses XEMU and sends real key events (the
+  `keybd_event` method above). Names: arrows, `ret`, `a`, `b`, E/S/D/F (left stick), I/J/K/L
+  (right stick); `waitN` sleeps, `holdK:N` holds a key.
 - `qmp_shot.ps1` does **not** work: xemu's monitor has no `screendump` command. Use `grab.ps1`.
 
 ## Code map (Xbox-specific bits)
@@ -306,6 +309,29 @@ engine's 32x24 px scroll steps.
   `obj_intersects_with`) the pointer moves at 45% speed (friction). Within 40 px of one's bounds
   and moving toward it, the path bends toward its center without changing speed (magnetism);
   moving away is never resisted. Tuning constants are at the top of the function.
+- **UI pointer assist** (`win_pointer_assist`, button.cc), same setting. Runs first; the map assist
+  only runs when it finds no button. It looks at the top window under the pointer and its buttons
+  (skipping disabled ones, ones with no events/procs, ones over 460x120 or covering half the
+  window). Pull radius 24 px; friction (50%) only on buttons 40 px or less in one dimension, and
+  nothing at all while inside a bigger one (e.g. the active item slot). The steering maths for both
+  assists is in `plib/gnw/pointer_assist.h`.
+- **D-pad target jumping** (`gmouse_jump_to_target`, gmouse.cc; called from the arrow-key cases in
+  `game.cc` `game_handle_input`, so only in the map view). Jumps the pointer to the nearest
+  pickable object within ~50 degrees of the pressed direction (same filter as the map assist, on
+  screen, not under a roof), switching walk mode to the arrow, or in combat to the crosshair when
+  the active item allows it. With nothing in that direction it does nothing (the d-pad no
+  longer scrolls the map on NXDK; the right stick pans).
+  Dialogs/menus with their own d-pad navigation run their own input loops and are unaffected.
+- **D-pad selection** (gmouse.cc `gmouse_select_target` / `gmouse_track_target`, called at the start
+  of `gmouse_bk_process`). The jumped-to object gets the gold item outline (`OUTLINE_TYPE_ITEM`)
+  unless it already has one (combat outlines every critter; only an outline we added is removed).
+  The pointer aims at a solid pixel of the sprite (nearest to the bounds' middle), and follows the
+  object when it moves more than 8 px or the pointer is no longer on it, so walking NPCs stay
+  selected. The selection drops when anything else moves the pointer (left stick, centering lock,
+  warps), on walk mode, map panning, dialogue, when it leaves the screen or stops being a valid
+  target. Each frame it checks the object still exists by looking for its pointer among nearby
+  objects (never dereferencing first); `obj_erase_object` and `obj_disconnect` (pickups) call
+  `gmouse_forget_target`, and `gmouse_reset` clears it without touching the object.
 - The Preferences "Mouse Sensitivity" slider has no effect on Xbox (the scaling in `mouse.cc` is
   in the non-NXDK branch).
 

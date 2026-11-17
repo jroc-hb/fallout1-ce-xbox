@@ -892,6 +892,22 @@ int game_handle_input(int eventCode, bool isInCombatMode)
             display_print(version_build_time);
         }
         break;
+#ifdef NXDK
+    // The d-pad (arrow keys) jumps the pointer to the nearest target in that
+    // direction, and does nothing when there is none (the right stick pans).
+    case KEY_ARROW_LEFT:
+        gmouse_jump_to_target(-1, 0);
+        break;
+    case KEY_ARROW_RIGHT:
+        gmouse_jump_to_target(1, 0);
+        break;
+    case KEY_ARROW_UP:
+        gmouse_jump_to_target(0, -1);
+        break;
+    case KEY_ARROW_DOWN:
+        gmouse_jump_to_target(0, 1);
+        break;
+#else
     case KEY_ARROW_LEFT:
         map_scroll(-1, 0);
         break;
@@ -904,6 +920,7 @@ int game_handle_input(int eventCode, bool isInCombatMode)
     case KEY_ARROW_DOWN:
         map_scroll(0, 1);
         break;
+#endif
     }
 
     return 0;

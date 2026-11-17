@@ -27,6 +27,7 @@
 #include "plib/gnw/grbuf.h"
 #include "plib/gnw/input.h"
 #include "plib/gnw/memory.h"
+#include "plib/gnw/pointer_assist.h"
 #include "plib/gnw/rect.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
@@ -49,6 +50,10 @@ static int gmouse_3d_set_flat_fid(int fid, Rect* rect);
 static int gmouse_3d_reset_flat_fid(Rect* rect);
 static int gmouse_3d_move_to(int x, int y, int elevation, Rect* a4);
 static int gmouse_check_scrolling(int x, int y, int cursor);
+#ifdef NXDK
+static void gmouse_track_target();
+static void gmouse_clear_target(bool objectValid);
+#endif
 
 // 0x505258
 static bool gmouse_initialized = false;
@@ -341,6 +346,11 @@ int gmouse_reset()
         return -1;
     }
 
+#ifdef NXDK
+    // The objects are about to go away; don't touch the selection.
+    gmouse_clear_target(false);
+#endif
+
     // NOTE: Uninline.
     if (gmouse_3d_reset() != 0) {
         return -1;
@@ -620,6 +630,10 @@ void gmouse_bk_process()
     if (!gmouse_initialized) {
         return;
     }
+
+#ifdef NXDK
+    gmouse_track_target();
+#endif
 
     int mouseX;
     int mouseY;
@@ -2592,22 +2606,22 @@ void gameMouseRefreshImmediately()
 #define POINTER_ASSIST_MAX_OBJECTS 256
 
 // Whether the pointer assist should consider `obj` in the current mode.
-static bool gmouse_pointer_assist_wants(Object* obj)
+static bool gmouse_pointer_assist_wants(Object* obj, int mode)
 {
     if ((obj->flags & OBJECT_HIDDEN) != 0) {
         return false;
     }
 
     int type = FID_TYPE(obj->fid);
-    bool skillMode = gmouse_3d_current_mode >= FIRST_GAME_MOUSE_MODE_SKILL;
+    bool skillMode = mode >= FIRST_GAME_MOUSE_MODE_SKILL;
 
     if (obj == obj_dude) {
         // Only for healing yourself.
-        return gmouse_3d_current_mode == GAME_MOUSE_MODE_USE_FIRST_AID
-            || gmouse_3d_current_mode == GAME_MOUSE_MODE_USE_DOCTOR;
+        return mode == GAME_MOUSE_MODE_USE_FIRST_AID
+            || mode == GAME_MOUSE_MODE_USE_DOCTOR;
     }
 
-    switch (gmouse_3d_current_mode) {
+    switch (mode) {
     case GAME_MOUSE_MODE_CROSSHAIR:
         // Attacking: living critters only.
         return type == OBJ_TYPE_CRITTER
@@ -2672,7 +2686,7 @@ void gmouse_pointer_assist(float* dx, float* dy)
 
     for (int index = 0; index < count; index++) {
         Object* obj = objects[index];
-        if (!gmouse_pointer_assist_wants(obj)) {
+        if (!gmouse_pointer_assist_wants(obj, gmouse_3d_current_mode)) {
             continue;
         }
 
@@ -2692,9 +2706,7 @@ void gmouse_pointer_assist(float* dx, float* dy)
         }
 
         // Distance from the pointer to the bounds (0 inside).
-        int outX = std::max(std::max(rect.ulx - mouseX, mouseX - rect.lrx), 0);
-        int outY = std::max(std::max(rect.uly - mouseY, mouseY - rect.lry), 0);
-        int distance = (int)std::sqrt((float)(outX * outX + outY * outY));
+        int distance = pointer_assist_distance(mouseX, mouseY, rect.ulx, rect.uly, rect.lrx, rect.lry);
 
         if (distance == 0 && obj_intersects_with(obj, mouseX, mouseY) != 0) {
             over = true;
@@ -2707,43 +2719,287 @@ void gmouse_pointer_assist(float* dx, float* dy)
         }
     }
 
-    // Friction: slow down over something you can click, so it is easy to
-    // stop on.
-    if (over) {
-        *dx *= POINTER_ASSIST_FRICTION;
-        *dy *= POINTER_ASSIST_FRICTION;
+    pointer_assist_apply(dx, dy, mouseX, mouseY, over, bestDistance, targetX, targetY,
+        POINTER_ASSIST_RADIUS, POINTER_ASSIST_FRICTION, POINTER_ASSIST_STEER);
+}
+
+// The object the d-pad last jumped to. The pointer follows it (it may walk,
+// or the camera may pan) until something else moves the pointer, and it gets
+// the gold item outline unless it already has one (combat outlines every
+// critter).
+static Object* gmouse_target = NULL;
+static bool gmouse_target_outlined = false;
+static int gmouse_target_x = 0; // pointer position we last set
+static int gmouse_target_y = 0;
+
+static bool gmouse_target_on_screen(Object* obj, int* centerX, int* centerY);
+
+// Ends the selection. Only touches the object when `objectValid` (it may have
+// been freed) and only removes the outline we added.
+static void gmouse_clear_target(bool objectValid)
+{
+    if (gmouse_target == NULL) {
         return;
     }
 
-    if (bestDistance > POINTER_ASSIST_RADIUS) {
+    if (objectValid && gmouse_target_outlined && (gmouse_target->outline & OUTLINE_TYPE_MASK) == OUTLINE_TYPE_ITEM) {
+        Rect rect;
+        if (obj_remove_outline(gmouse_target, &rect) == 0) {
+            tile_refresh_rect(&rect, gmouse_target->elevation);
+        }
+        // The hover code shares the item outline; don't leave it pointing at
+        // an outline that's gone.
+        if (outlined_object == gmouse_target) {
+            outlined_object = NULL;
+        }
+    }
+
+    gmouse_target = NULL;
+    gmouse_target_outlined = false;
+}
+
+// Outlines the selection if nothing else has (or the hover code removed ours).
+static void gmouse_outline_target()
+{
+    if ((gmouse_target->outline & OUTLINE_TYPE_MASK) != 0) {
         return;
     }
 
-    // Magnetism: when heading roughly toward a nearby target, bend the path
-    // toward its center without changing speed. Moving away is never
-    // resisted.
-    float speed = std::sqrt(*dx * *dx + *dy * *dy);
-    float toX = (float)(targetX - mouseX);
-    float toY = (float)(targetY - mouseY);
-    float toLength = std::sqrt(toX * toX + toY * toY);
-    if (speed <= 0.0f || toLength <= 0.0f) {
+    Rect rect;
+    if (obj_outline_object(gmouse_target, OUTLINE_TYPE_ITEM, &rect) == 0) {
+        gmouse_target_outlined = true;
+        tile_refresh_rect(&rect, gmouse_target->elevation);
+    }
+}
+
+static void gmouse_move_pointer_to(int x, int y)
+{
+    mouse_hide();
+    mouse_set_position(x, y);
+    mouse_show();
+    mouse_get_position(&gmouse_target_x, &gmouse_target_y);
+}
+
+static void gmouse_select_target(Object* obj, int x, int y)
+{
+    if (obj != gmouse_target) {
+        gmouse_clear_target(true);
+        gmouse_target = obj;
+        gmouse_target_outlined = false;
+    }
+
+    gmouse_outline_target();
+    gmouse_move_pointer_to(x, y);
+}
+
+void gmouse_forget_target(Object* obj)
+{
+    if (obj != NULL && obj == gmouse_target) {
+        gmouse_clear_target(true);
+    }
+}
+
+// Whether the selection still exists: look for its pointer among the
+// objects near where it was last seen, without dereferencing it.
+static bool gmouse_target_exists()
+{
+    int tile = tile_num(gmouse_target_x, gmouse_target_y, map_elevation);
+    if (tile == -1) {
+        return false;
+    }
+
+    static Object* objects[POINTER_ASSIST_MAX_OBJECTS];
+    int count = obj_list_near_tile(tile, POINTER_ASSIST_HEX_RADIUS, map_elevation, objects, POINTER_ASSIST_MAX_OBJECTS);
+    for (int index = 0; index < count; index++) {
+        if (objects[index] == gmouse_target) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Once a frame: keep the pointer on the selection, or drop it.
+static void gmouse_track_target()
+{
+    if (gmouse_target == NULL) {
         return;
     }
 
-    float dirX = *dx / speed;
-    float dirY = *dy / speed;
-    toX /= toLength;
-    toY /= toLength;
-    if (dirX * toX + dirY * toY < 0.25f) {
+    if (!gmouse_target_exists()) {
+        gmouse_clear_target(false);
         return;
     }
 
-    float strength = POINTER_ASSIST_STEER * (1.0f - (float)bestDistance / (float)(POINTER_ASSIST_RADIUS + 1));
-    float bentX = dirX + toX * strength;
-    float bentY = dirY + toY * strength;
-    float bentLength = std::sqrt(bentX * bentX + bentY * bentY);
-    *dx = bentX / bentLength * speed;
-    *dy = bentY / bentLength * speed;
+    // Something else moved the pointer (left stick, centering, a warp), the
+    // cursor went back to walking, the map view isn't in use, or the target
+    // stopped being one (e.g. died while targeted for an attack).
+    int mouseX;
+    int mouseY;
+    mouse_get_position(&mouseX, &mouseY);
+    if (mouseX != gmouse_target_x || mouseY != gmouse_target_y
+        || gmouse_3d_current_mode == GAME_MOUSE_MODE_MOVE
+        || !gmouse_enabled
+        || !gmouse_scrolling_is_enabled()
+        || map_pixel_scrolling()
+        || !gmouse_pointer_assist_wants(gmouse_target, gmouse_3d_current_mode)) {
+        gmouse_clear_target(true);
+        return;
+    }
+
+    int x;
+    int y;
+    if (!gmouse_target_on_screen(gmouse_target, &x, &y)) {
+        gmouse_clear_target(true);
+        return;
+    }
+
+    gmouse_outline_target();
+
+    // Follow it when it actually moves (walking, knocked back), not for the
+    // pixel or two its bounds change between animation frames: each pointer
+    // move restarts the hover delay before the action icon shows.
+    bool stillOver = obj_intersects_with(gmouse_target, gmouse_target_x, gmouse_target_y) != 0;
+    bool moved = x != gmouse_target_x || y != gmouse_target_y;
+    if (moved && (!stillOver || std::abs(x - gmouse_target_x) > 8 || std::abs(y - gmouse_target_y) > 8)) {
+        gmouse_move_pointer_to(x, y);
+    }
+}
+
+// Screen-space bounds of `obj` if the pointer could pick it right now (on
+// screen in the map view, not under a roof), with its center.
+static bool gmouse_target_on_screen(Object* obj, int* centerX, int* centerY)
+{
+    Rect rect;
+    obj_bound(obj, &rect);
+    if (rect.lrx <= rect.ulx || rect.lry <= rect.uly) {
+        return false;
+    }
+
+    int x = (rect.ulx + rect.lrx) / 2;
+    int y = (rect.uly + rect.lry) / 2;
+
+    // Aim at a point on the sprite itself: the middle of the bounds can be
+    // transparent (between legs, a ring-shaped item), and a click there
+    // would miss it. Search outward from the middle for a solid pixel.
+    if (obj_intersects_with(obj, x, y) == 0) {
+        bool found = false;
+        for (int radius = 2; radius <= 24 && !found; radius += 2) {
+            static const int dirs[8][2] = { { 0, 1 }, { 0, -1 }, { 1, 0 }, { -1, 0 }, { 1, 1 }, { -1, 1 }, { 1, -1 }, { -1, -1 } };
+            for (int index = 0; index < 8; index++) {
+                int px = x + dirs[index][0] * radius;
+                int py = y + dirs[index][1] * radius;
+                if (obj_intersects_with(obj, px, py) != 0) {
+                    x = px;
+                    y = py;
+                    found = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // The map view is everything above the 100 px interface bar.
+    if (x < scr_size.ulx || x > scr_size.lrx || y < scr_size.uly || y > scr_size.lry - 100) {
+        return false;
+    }
+
+    if (win_get_top_win(x, y) != display_win) {
+        return false;
+    }
+
+    if (square_roof_intersect(x, y, map_elevation) && obj_intersects_with(obj_egg, x, y) == 0) {
+        return false;
+    }
+
+    *centerX = x;
+    *centerY = y;
+    return true;
+}
+
+bool gmouse_jump_to_target(int dirX, int dirY)
+{
+    if (!gmouse_initialized || !gmouse_enabled || gmouse_mapper_mode != 0) {
+        return false;
+    }
+
+    if (!gmouse_scrolling_is_enabled() || !gmouse_3d_modes_are_enabled()) {
+        return false;
+    }
+
+    // Walking mode has no targets: pick the arrow, or in combat the attack
+    // crosshair when the active item allows it (as gmouse_3d_toggle_mode).
+    int mode = gmouse_3d_current_mode;
+    if (mode == GAME_MOUSE_MODE_MOVE) {
+        mode = GAME_MOUSE_MODE_ARROW;
+        if (isInCombat()) {
+            Object* item;
+            if (intface_get_current_item(&item) == 0
+                && (item == NULL || item_get_type(item) == ITEM_TYPE_WEAPON)) {
+                mode = GAME_MOUSE_MODE_CROSSHAIR;
+            }
+        }
+    }
+
+    int mouseX;
+    int mouseY;
+    mouse_get_position(&mouseX, &mouseY);
+
+    // Everything within reach of the screen: the view is at most 1280 px
+    // (40 hexes) wide and about 52 hex rows tall.
+    int centerTile = tile_num((scr_size.lrx - scr_size.ulx + 1) / 2, (scr_size.lry - scr_size.uly - 99) / 2, map_elevation);
+    if (centerTile == -1) {
+        return false;
+    }
+
+    static Object* objects[1024];
+    int count = obj_list_near_tile(centerTile, 40, map_elevation, objects, 1024);
+
+    Object* best = NULL;
+    float bestScore = 0.0f;
+    int bestX = 0;
+    int bestY = 0;
+
+    for (int index = 0; index < count; index++) {
+        Object* obj = objects[index];
+        if (!gmouse_pointer_assist_wants(obj, mode)) {
+            continue;
+        }
+
+        int x;
+        int y;
+        if (!gmouse_target_on_screen(obj, &x, &y)) {
+            continue;
+        }
+
+        // In the d-pad direction, within about 50 degrees of it; nearer and
+        // straighter wins. Skips whatever the pointer is already on.
+        float vx = (float)(x - mouseX);
+        float vy = (float)(y - mouseY);
+        float along = vx * dirX + vy * dirY;
+        float across = std::fabs(vx * dirY - vy * dirX);
+        if (along < 12.0f || across > along * 1.2f) {
+            continue;
+        }
+
+        float score = along + 2.0f * across;
+        if (best == NULL || score < bestScore) {
+            best = obj;
+            bestScore = score;
+            bestX = x;
+            bestY = y;
+        }
+    }
+
+    if (best == NULL) {
+        return false;
+    }
+
+    if (mode != gmouse_3d_current_mode) {
+        gmouse_3d_set_mode(mode);
+    }
+
+    gmouse_select_target(best, bestX, bestY);
+    return true;
 }
 #endif
 

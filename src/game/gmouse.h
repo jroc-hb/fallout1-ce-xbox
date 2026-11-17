@@ -120,6 +120,16 @@ void gameMouseRefreshImmediately();
 // in the current mode and bends its path toward one it is heading for.
 // (dx, dy) is this frame's pointer movement in pixels, adjusted in place.
 void gmouse_pointer_assist(float* dx, float* dy);
+
+// Jumps the pointer to the nearest object it can act on in direction
+// (dirX, dirY) (a d-pad direction, -1/0/1 each), switching from walking to
+// the arrow (or the attack crosshair in combat). Returns false if there is
+// none, leaving everything unchanged.
+bool gmouse_jump_to_target(int dirX, int dirY);
+
+// Drops the d-pad selection if it is `obj` (the object is being removed from
+// the map). Safe to call with any object.
+void gmouse_forget_target(Object* obj);
 #endif
 
 } // namespace fallout

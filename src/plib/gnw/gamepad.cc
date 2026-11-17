@@ -3,6 +3,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "plib/gnw/button.h"
 #include "plib/gnw/debug.h"
 #include "plib/gnw/gamepad.hpp"
 #include "plib/gnw/mouse.h"
@@ -538,7 +539,7 @@ void ProcessLeftStick()
     float moveX = leftStickX / length * pixels;
     float moveY = -leftStickY / length * pixels;
 
-    if (gPointerAssist) {
+    if (gPointerAssist && !win_pointer_assist(&moveX, &moveY)) {
         gmouse_pointer_assist(&moveX, &moveY);
     }
 

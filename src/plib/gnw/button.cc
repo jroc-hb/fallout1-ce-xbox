@@ -1,5 +1,7 @@
 #include "plib/gnw/button.h"
 
+#include "plib/gnw/pointer_assist.h"
+
 #include "plib/color/color.h"
 #include "plib/gnw/gnw.h"
 #include "plib/gnw/grbuf.h"
@@ -1267,6 +1269,112 @@ int win_get_button_top_right_x(int btn) {
         return (b->rect.ulx + b->rect.lrx) + b->win_rect.ulx - 3;
     }
     return 0;
+}
+
+// UI pointer assist tuning (see pointer_assist.h).
+#define UI_ASSIST_RADIUS 24
+#define UI_ASSIST_FRICTION 0.5f
+#define UI_ASSIST_STEER 0.8f
+// Bigger buttons are invisible click areas (whole panels, list regions),
+// not things to aim at.
+#define UI_ASSIST_MAX_WIDTH 460
+#define UI_ASSIST_MAX_HEIGHT 120
+// Friction only on buttons this thin in at least one direction; bigger ones
+// (the active item slot) are easy to hit and just slow to cross.
+#define UI_ASSIST_FRICTION_MAX_SIZE 40
+
+// Whether `button` is something the pointer assist should aim at.
+static bool win_pointer_assist_wants(Window* w, Button* button)
+{
+    if ((button->flags & BUTTON_FLAG_DISABLED) != 0) {
+        return false;
+    }
+
+    int width = button->rect.lrx - button->rect.ulx + 1;
+    int height = button->rect.lry - button->rect.uly + 1;
+    if (width <= 0 || height <= 0 || width > UI_ASSIST_MAX_WIDTH || height > UI_ASSIST_MAX_HEIGHT) {
+        return false;
+    }
+
+    // Covers most of its window: a catch-all click area.
+    if (width * height * 2 > w->width * w->height) {
+        return false;
+    }
+
+    // Does nothing when clicked.
+    if (button->lefMouseDownEventCode == -1 && button->leftMouseUpEventCode == -1
+        && button->rightMouseDownEventCode == -1 && button->rightMouseUpEventCode == -1
+        && button->leftMouseDownProc == NULL && button->leftMouseUpProc == NULL
+        && button->rightMouseDownProc == NULL && button->rightMouseUpProc == NULL) {
+        return false;
+    }
+
+    return true;
+}
+
+bool win_pointer_assist(float* dx, float* dy)
+{
+    int mouseX;
+    int mouseY;
+    mouse_get_position(&mouseX, &mouseY);
+
+    Window* w = GNW_find(win_get_top_win(mouseX, mouseY));
+    if (w == NULL || (w->flags & WINDOW_HIDDEN) != 0) {
+        return false;
+    }
+
+    bool found = false;
+    bool over = false;
+    bool overBig = false;
+    int bestDistance = UI_ASSIST_RADIUS + 1;
+    int targetX = 0;
+    int targetY = 0;
+
+    for (Button* button = w->buttonListHead; button != NULL; button = button->next) {
+        if (!win_pointer_assist_wants(w, button)) {
+            continue;
+        }
+
+        int left = w->rect.ulx + button->rect.ulx;
+        int top = w->rect.uly + button->rect.uly;
+        int right = w->rect.ulx + button->rect.lrx;
+        int bottom = w->rect.uly + button->rect.lry;
+
+        int distance = pointer_assist_distance(mouseX, mouseY, left, top, right, bottom);
+        if (distance > UI_ASSIST_RADIUS) {
+            continue;
+        }
+
+        found = true;
+        if (distance == 0) {
+            int width = right - left + 1;
+            int height = bottom - top + 1;
+            if (width <= UI_ASSIST_FRICTION_MAX_SIZE || height <= UI_ASSIST_FRICTION_MAX_SIZE) {
+                over = true;
+            } else {
+                overBig = true;
+            }
+        }
+
+        if (distance < bestDistance) {
+            bestDistance = distance;
+            targetX = (left + right) / 2;
+            targetY = (top + bottom) / 2;
+        }
+    }
+
+    if (!found) {
+        return false;
+    }
+
+    // Inside a big button: leave the pointer alone.
+    if (overBig && !over) {
+        return true;
+    }
+
+    pointer_assist_apply(dx, dy, mouseX, mouseY, over, bestDistance, targetX, targetY,
+        UI_ASSIST_RADIUS, UI_ASSIST_FRICTION, UI_ASSIST_STEER);
+    return true;
 }
 
 int win_get_button_top_right_y(int btn) {
