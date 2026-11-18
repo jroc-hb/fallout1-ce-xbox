@@ -16,8 +16,10 @@
 #include "game/intface.h"
 #include "game/item.h"
 #include "game/map.h"
+#include "game/map_defs.h"
 #include "game/object.h"
 #include "game/protinst.h"
+#include "game/textobj.h"
 #include "game/proto.h"
 #include "game/skilldex.h"
 #include "game/tile.h"
@@ -311,6 +313,12 @@ static bool gmouse_3d_item_highlight = true;
 // 0x5053F0
 static Object* outlined_object = NULL;
 
+#ifdef NXDK
+// Stick walking hid the pointer (gmouse_walk_hide_pointer).
+static bool gmouse_walk_hidden = false;
+static void gmouse_near_clear(bool objectValid);
+#endif
+
 // 0x5053F4
 bool gmouse_clicked_on_edge = false;
 
@@ -358,6 +366,7 @@ int gmouse_reset()
 #ifdef NXDK
     // The objects are about to go away; don't touch the selection.
     gmouse_clear_target(false);
+    gmouse_near_clear(false);
 #endif
 
     // NOTE: Uninline.
@@ -642,6 +651,18 @@ void gmouse_bk_process()
 
 #ifdef NXDK
     gmouse_track_target();
+
+    // Stick walking hid the pointer: no cursor, hex cursor, hover outline or
+    // edge scrolling until it comes back (gmouse_walk_show_pointer).
+    if (gmouse_walk_hidden) {
+        if (!mouse_hidden()) {
+            mouse_hide();
+        }
+        if (gmouse_3d_is_on()) {
+            gmouse_3d_off();
+        }
+        return;
+    }
 #endif
 
     int mouseX;
@@ -1004,11 +1025,67 @@ void gmouse_bk_process()
 }
 
 // 0x443AA0
+static void gmouse_action_menu(Object* target, int mouseX, int mouseY, bool (*held)());
+
+// What a left click on `target` does with the arrow cursor: pick it up,
+// talk to or loot it, use it, or look at it. Also the A button's action on
+// the object next to the player while stick walking.
+static void gmouse_default_action(Object* target)
+{
+    switch (FID_TYPE(target->fid)) {
+    case OBJ_TYPE_ITEM:
+        action_get_an_object(obj_dude, target);
+        break;
+    case OBJ_TYPE_CRITTER:
+        if (target == obj_dude) {
+            if (FID_ANIM_TYPE(obj_dude->fid) == ANIM_STAND) {
+                Rect a1;
+                if (obj_inc_rotation(target, &a1) == 0) {
+                    tile_refresh_rect(&a1, target->elevation);
+                }
+            }
+        } else {
+            if (obj_action_can_talk_to(target)) {
+                if (isInCombat()) {
+                    if (obj_examine(obj_dude, target) == -1) {
+                        obj_look_at(obj_dude, target);
+                    }
+                } else {
+                    action_talk_to(obj_dude, target);
+                }
+            } else {
+                action_loot_container(obj_dude, target);
+            }
+        }
+        break;
+    case OBJ_TYPE_SCENERY:
+        if (proto_action_can_use(target->pid)) {
+            action_use_an_object(obj_dude, target);
+        } else {
+            if (obj_examine(obj_dude, target) == -1) {
+                obj_look_at(obj_dude, target);
+            }
+        }
+        break;
+    case OBJ_TYPE_WALL:
+        if (obj_examine(obj_dude, target) == -1) {
+            obj_look_at(obj_dude, target);
+        }
+        break;
+    }
+}
+
 void gmouse_handle_event(int mouseX, int mouseY, int mouseState)
 {
     if (!gmouse_initialized) {
         return;
     }
+
+#ifdef NXDK
+    if (gmouse_walk_hidden) {
+        return;
+    }
+#endif
 
     if (gmouse_current_cursor >= MOUSE_CURSOR_WAIT_PLANET) {
         return;
@@ -1073,47 +1150,7 @@ void gmouse_handle_event(int mouseX, int mouseY, int mouseState)
         if (gmouse_3d_current_mode == GAME_MOUSE_MODE_ARROW) {
             Object* target = object_under_mouse(-1, true, map_elevation);
             if (target != NULL) {
-                switch (FID_TYPE(target->fid)) {
-                case OBJ_TYPE_ITEM:
-                    action_get_an_object(obj_dude, target);
-                    break;
-                case OBJ_TYPE_CRITTER:
-                    if (target == obj_dude) {
-                        if (FID_ANIM_TYPE(obj_dude->fid) == ANIM_STAND) {
-                            Rect a1;
-                            if (obj_inc_rotation(target, &a1) == 0) {
-                                tile_refresh_rect(&a1, target->elevation);
-                            }
-                        }
-                    } else {
-                        if (obj_action_can_talk_to(target)) {
-                            if (isInCombat()) {
-                                if (obj_examine(obj_dude, target) == -1) {
-                                    obj_look_at(obj_dude, target);
-                                }
-                            } else {
-                                action_talk_to(obj_dude, target);
-                            }
-                        } else {
-                            action_loot_container(obj_dude, target);
-                        }
-                    }
-                    break;
-                case OBJ_TYPE_SCENERY:
-                    if (proto_action_can_use(target->pid)) {
-                        action_use_an_object(obj_dude, target);
-                    } else {
-                        if (obj_examine(obj_dude, target) == -1) {
-                            obj_look_at(obj_dude, target);
-                        }
-                    }
-                    break;
-                case OBJ_TYPE_WALL:
-                    if (obj_examine(obj_dude, target) == -1) {
-                        obj_look_at(obj_dude, target);
-                    }
-                    break;
-                }
+                gmouse_default_action(target);
             }
             return;
         }
@@ -1181,177 +1218,207 @@ void gmouse_handle_event(int mouseX, int mouseY, int mouseState)
     if ((mouseState & MOUSE_EVENT_LEFT_BUTTON_DOWN_REPEAT) == MOUSE_EVENT_LEFT_BUTTON_DOWN_REPEAT && gmouse_3d_current_mode == GAME_MOUSE_MODE_ARROW) {
         Object* target = object_under_mouse(-1, true, map_elevation);
         if (target != NULL) {
-            int actionMenuItemsCount = 0;
-            int actionMenuItems[6];
-            switch (FID_TYPE(target->fid)) {
-            case OBJ_TYPE_ITEM:
+            gmouse_action_menu(target, mouseX, mouseY, NULL);
+        }
+    }
+}
+
+// The action menu (use, look, talk, inventory, skill, ...) for `target`,
+// shown at (mouseX, mouseY): moving the mouse up and down (or the d-pad)
+// picks an entry, letting go of the button chooses it. `held` reports
+// whether the button is still down; NULL means the left mouse button.
+static void gmouse_action_menu(Object* target, int mouseX, int mouseY, bool (*held)())
+{
+    int actionMenuItemsCount = 0;
+    int actionMenuItems[6];
+    switch (FID_TYPE(target->fid)) {
+    case OBJ_TYPE_ITEM:
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE;
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_LOOK;
+        if (item_get_type(target) == ITEM_TYPE_CONTAINER) {
+            actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_INVENTORY;
+            actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE_SKILL;
+        }
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_CANCEL;
+        break;
+    case OBJ_TYPE_CRITTER:
+        if (target == obj_dude) {
+            actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_ROTATE;
+        } else {
+            if (obj_action_can_talk_to(target)) {
+                if (!isInCombat()) {
+                    actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_TALK;
+                }
+            } else {
                 actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE;
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_LOOK;
-                if (item_get_type(target) == ITEM_TYPE_CONTAINER) {
-                    actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_INVENTORY;
-                    actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE_SKILL;
-                }
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_CANCEL;
-                break;
-            case OBJ_TYPE_CRITTER:
-                if (target == obj_dude) {
-                    actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_ROTATE;
-                } else {
-                    if (obj_action_can_talk_to(target)) {
-                        if (!isInCombat()) {
-                            actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_TALK;
-                        }
-                    } else {
-                        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE;
-                    }
-                }
-
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_LOOK;
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_INVENTORY;
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE_SKILL;
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_CANCEL;
-                break;
-            case OBJ_TYPE_SCENERY:
-                if (proto_action_can_use(target->pid)) {
-                    actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE;
-                }
-
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_LOOK;
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_INVENTORY;
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE_SKILL;
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_CANCEL;
-                break;
-            case OBJ_TYPE_WALL:
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_LOOK;
-                if (proto_action_can_use(target->pid)) {
-                    actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_INVENTORY;
-                }
-                actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_CANCEL;
-                break;
             }
+        }
 
-            if (gmouse_3d_build_menu_frame(mouseX, mouseY, actionMenuItems, actionMenuItemsCount, scr_size.lrx - scr_size.ulx + 1, scr_size.lry - scr_size.uly - 99) == 0) {
-                Rect v43;
-                int fid = art_id(OBJ_TYPE_INTERFACE, 283, 0, 0, 0);
-                // NOTE: Uninline.
-                if (gmouse_3d_set_flat_fid(fid, &v43) == 0 && gmouse_3d_move_to(mouseX, mouseY, map_elevation, &v43) == 0) {
-                    tile_refresh_rect(&v43, map_elevation);
-                    map_disable_bk_processes();
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_LOOK;
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_INVENTORY;
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE_SKILL;
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_CANCEL;
+        break;
+    case OBJ_TYPE_SCENERY:
+        if (proto_action_can_use(target->pid)) {
+            actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE;
+        }
 
-                    int v33 = mouseY;
-                    int actionIndex = 0;
-                    while ((mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_UP) == 0) {
-                        sharedFpsLimiter.mark();
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_LOOK;
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_INVENTORY;
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_USE_SKILL;
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_CANCEL;
+        break;
+    case OBJ_TYPE_WALL:
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_LOOK;
+        if (proto_action_can_use(target->pid)) {
+            actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_INVENTORY;
+        }
+        actionMenuItems[actionMenuItemsCount++] = GAME_MOUSE_ACTION_MENU_ITEM_CANCEL;
+        break;
+    }
 
-                        get_input();
+    if (gmouse_3d_build_menu_frame(mouseX, mouseY, actionMenuItems, actionMenuItemsCount, scr_size.lrx - scr_size.ulx + 1, scr_size.lry - scr_size.uly - 99) == 0) {
+        Rect v43;
+        int fid = art_id(OBJ_TYPE_INTERFACE, 283, 0, 0, 0);
+        // NOTE: Uninline.
+        if (gmouse_3d_set_flat_fid(fid, &v43) == 0 && gmouse_3d_move_to(mouseX, mouseY, map_elevation, &v43) == 0) {
+            obj_set_mouse_flat_on_top(true);
+            tile_refresh_rect(&v43, map_elevation);
+            map_disable_bk_processes();
 
-                        if (game_user_wants_to_quit != 0) {
-                            actionMenuItems[actionIndex] = 0;
+            int v33 = mouseY;
+            int actionIndex = 0;
+            while (held != NULL ? held() : (mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_UP) == 0) {
+                sharedFpsLimiter.mark();
+
+                int key = get_input();
+
+                // CE: the d-pad (arrow keys) moves the selection too.
+                if (key == KEY_ARROW_UP || key == KEY_ARROW_DOWN) {
+                    int index = actionIndex + (key == KEY_ARROW_UP ? -1 : 1);
+                    if (index >= 0 && index < actionMenuItemsCount) {
+                        actionIndex = index;
+                        if (gmouse_3d_highlight_menu_frame(actionIndex) == 0) {
+                            tile_refresh_rect(&v43, map_elevation);
                         }
+                    }
+                }
 
-                        int v48;
-                        int v47;
-                        mouse_get_position(&v48, &v47);
+                if (game_user_wants_to_quit != 0) {
+                    actionMenuItems[actionIndex] = 0;
+                }
 
-                        if (abs(v47 - v33) > 10) {
-                            if (v33 >= v47) {
-                                actionIndex -= 1;
-                            } else {
-                                actionIndex += 1;
-                            }
+                int v48;
+                int v47;
+                mouse_get_position(&v48, &v47);
 
-                            if (gmouse_3d_highlight_menu_frame(actionIndex) == 0) {
-                                tile_refresh_rect(&v43, map_elevation);
-                            }
-                            v33 = v47;
-                        }
-
-                        renderPresent();
-                        sharedFpsLimiter.throttle();
+                if (abs(v47 - v33) > 10) {
+                    if (v33 >= v47) {
+                        actionIndex -= 1;
+                    } else {
+                        actionIndex += 1;
                     }
 
-                    map_enable_bk_processes();
+                    // CE: stay on the menu (the index could run off either
+                    // end and then index past actionMenuItems).
+                    if (actionIndex < 0) {
+                        actionIndex = 0;
+                    } else if (actionIndex >= actionMenuItemsCount) {
+                        actionIndex = actionMenuItemsCount - 1;
+                    }
 
-                    gmouse_3d_hover_test = false;
-                    gmouse_3d_last_mouse_x = mouseX;
-                    gmouse_3d_last_mouse_y = mouseY;
-                    gmouse_3d_last_move_time = get_time();
-
-                    mouse_set_position(mouseX, v33);
-
-                    if (gmouse_3d_reset_flat_fid(&v43) == 0) {
+                    if (gmouse_3d_highlight_menu_frame(actionIndex) == 0) {
                         tile_refresh_rect(&v43, map_elevation);
                     }
+                    v33 = v47;
+                }
 
-                    switch (actionMenuItems[actionIndex]) {
-                    case GAME_MOUSE_ACTION_MENU_ITEM_INVENTORY:
-                        use_inventory_on(target);
-                        break;
-                    case GAME_MOUSE_ACTION_MENU_ITEM_LOOK:
-                        if (obj_examine(obj_dude, target) == -1) {
-                            obj_look_at(obj_dude, target);
-                        }
-                        break;
-                    case GAME_MOUSE_ACTION_MENU_ITEM_ROTATE:
-                        if (obj_inc_rotation(target, &v43) == 0) {
-                            tile_refresh_rect(&v43, target->elevation);
-                        }
-                        break;
-                    case GAME_MOUSE_ACTION_MENU_ITEM_TALK:
-                        action_talk_to(obj_dude, target);
-                        break;
-                    case GAME_MOUSE_ACTION_MENU_ITEM_USE:
-                        switch (FID_TYPE(target->fid)) {
-                        case OBJ_TYPE_SCENERY:
-                            action_use_an_object(obj_dude, target);
-                            break;
-                        case OBJ_TYPE_CRITTER:
-                            action_loot_container(obj_dude, target);
-                            break;
-                        default:
-                            action_get_an_object(obj_dude, target);
-                            break;
-                        }
-                        break;
-                    case GAME_MOUSE_ACTION_MENU_ITEM_USE_SKILL:
-                        if (1) {
-                            int skill = -1;
+                renderPresent();
+                sharedFpsLimiter.throttle();
+            }
 
-                            int rc = skilldex_select();
-                            switch (rc) {
-                            case SKILLDEX_RC_SNEAK:
-                                action_skill_use(SKILL_SNEAK);
-                                break;
-                            case SKILLDEX_RC_LOCKPICK:
-                                skill = SKILL_LOCKPICK;
-                                break;
-                            case SKILLDEX_RC_STEAL:
-                                skill = SKILL_STEAL;
-                                break;
-                            case SKILLDEX_RC_TRAPS:
-                                skill = SKILL_TRAPS;
-                                break;
-                            case SKILLDEX_RC_FIRST_AID:
-                                skill = SKILL_FIRST_AID;
-                                break;
-                            case SKILLDEX_RC_DOCTOR:
-                                skill = SKILL_DOCTOR;
-                                break;
-                            case SKILLDEX_RC_SCIENCE:
-                                skill = SKILL_SCIENCE;
-                                break;
-                            case SKILLDEX_RC_REPAIR:
-                                skill = SKILL_REPAIR;
-                                break;
-                            }
+            map_enable_bk_processes();
+            obj_set_mouse_flat_on_top(false);
 
-                            if (skill != -1) {
-                                action_use_skill_on(obj_dude, target, skill);
-                            }
-                        }
+            gmouse_3d_hover_test = false;
+            gmouse_3d_last_mouse_x = mouseX;
+            gmouse_3d_last_mouse_y = mouseY;
+            gmouse_3d_last_move_time = get_time();
+
+            mouse_set_position(mouseX, v33);
+
+            if (gmouse_3d_reset_flat_fid(&v43) == 0) {
+                tile_refresh_rect(&v43, map_elevation);
+            }
+
+            switch (actionMenuItems[actionIndex]) {
+            case GAME_MOUSE_ACTION_MENU_ITEM_INVENTORY:
+                use_inventory_on(target);
+                break;
+            case GAME_MOUSE_ACTION_MENU_ITEM_LOOK:
+                if (obj_examine(obj_dude, target) == -1) {
+                    obj_look_at(obj_dude, target);
+                }
+                break;
+            case GAME_MOUSE_ACTION_MENU_ITEM_ROTATE:
+                if (obj_inc_rotation(target, &v43) == 0) {
+                    tile_refresh_rect(&v43, target->elevation);
+                }
+                break;
+            case GAME_MOUSE_ACTION_MENU_ITEM_TALK:
+                action_talk_to(obj_dude, target);
+                break;
+            case GAME_MOUSE_ACTION_MENU_ITEM_USE:
+                switch (FID_TYPE(target->fid)) {
+                case OBJ_TYPE_SCENERY:
+                    action_use_an_object(obj_dude, target);
+                    break;
+                case OBJ_TYPE_CRITTER:
+                    action_loot_container(obj_dude, target);
+                    break;
+                default:
+                    action_get_an_object(obj_dude, target);
+                    break;
+                }
+                break;
+            case GAME_MOUSE_ACTION_MENU_ITEM_USE_SKILL:
+                if (1) {
+                    int skill = -1;
+
+                    int rc = skilldex_select();
+                    switch (rc) {
+                    case SKILLDEX_RC_SNEAK:
+                        action_skill_use(SKILL_SNEAK);
+                        break;
+                    case SKILLDEX_RC_LOCKPICK:
+                        skill = SKILL_LOCKPICK;
+                        break;
+                    case SKILLDEX_RC_STEAL:
+                        skill = SKILL_STEAL;
+                        break;
+                    case SKILLDEX_RC_TRAPS:
+                        skill = SKILL_TRAPS;
+                        break;
+                    case SKILLDEX_RC_FIRST_AID:
+                        skill = SKILL_FIRST_AID;
+                        break;
+                    case SKILLDEX_RC_DOCTOR:
+                        skill = SKILL_DOCTOR;
+                        break;
+                    case SKILLDEX_RC_SCIENCE:
+                        skill = SKILL_SCIENCE;
+                        break;
+                    case SKILLDEX_RC_REPAIR:
+                        skill = SKILL_REPAIR;
                         break;
                     }
+
+                    if (skill != -1) {
+                        action_use_skill_on(obj_dude, target, skill);
+                    }
                 }
+                break;
             }
         }
     }
@@ -2751,6 +2818,7 @@ static int gmouse_target_x = 0; // pointer position we last set
 static int gmouse_target_y = 0;
 
 static bool gmouse_target_on_screen(Object* obj, int* centerX, int* centerY);
+static void gmouse_near_forget(Object* obj);
 
 // Ends the selection. Only touches the object when `objectValid` (it may have
 // been freed) and only removes the outline we added.
@@ -2815,6 +2883,7 @@ void gmouse_forget_target(Object* obj)
     if (obj != NULL && obj == gmouse_target) {
         gmouse_clear_target(true);
     }
+    gmouse_near_forget(obj);
 }
 
 // Whether the selection still exists: look for its pointer among the
@@ -2944,6 +3013,12 @@ bool gmouse_jump_to_target(int dirX, int dirY)
         return false;
     }
 
+    // While stick walking hid the pointer, the d-pad switches between the
+    // objects next to the player instead.
+    if (gmouse_walk_hidden) {
+        return gmouse_near_target_step(dirX, dirY);
+    }
+
     // Walking mode has no targets: pick the arrow, or in combat the attack
     // crosshair when the active item allows it (as gmouse_3d_toggle_mode).
     int mode = gmouse_3d_current_mode;
@@ -3017,6 +3092,402 @@ bool gmouse_jump_to_target(int dirX, int dirY)
     }
 
     gmouse_select_target(best, bestX, bestY);
+    return true;
+}
+
+// Stick walking (stickwalk.cc): while the stick walks the player the pointer
+// is hidden, and the object the player is next to gets the gold outline, a
+// label saying what A does, and is what A acts on.
+
+// How far from the player (in hexes) the A button reaches.
+#define GMOUSE_NEAR_RANGE 2
+#define GMOUSE_NEAR_MAX_CANDIDATES 32
+
+// The object A acts on, and whether the outline / label on it are ours.
+static Object* gmouse_near = NULL;
+static bool gmouse_near_outlined = false;
+static bool gmouse_near_labelled = false;
+// Picked with the d-pad: kept (over the nearest) until the player moves.
+static bool gmouse_near_locked = false;
+static int gmouse_near_lock_tile = -1;
+
+static void gmouse_near_clear(bool objectValid)
+{
+    if (gmouse_near == NULL) {
+        return;
+    }
+
+    if (objectValid) {
+        if (gmouse_near_outlined && (gmouse_near->outline & OUTLINE_TYPE_MASK) == OUTLINE_TYPE_ITEM) {
+            Rect rect;
+            if (obj_remove_outline(gmouse_near, &rect) == 0) {
+                tile_refresh_rect(&rect, gmouse_near->elevation);
+            }
+        }
+        if (gmouse_near_labelled) {
+            text_object_remove_label(gmouse_near);
+        }
+    }
+
+    gmouse_near = NULL;
+    gmouse_near_outlined = false;
+    gmouse_near_labelled = false;
+    gmouse_near_locked = false;
+}
+
+static void gmouse_near_forget(Object* obj)
+{
+    if (obj != NULL && obj == gmouse_near) {
+        gmouse_near_clear(true);
+    }
+}
+
+// Whether the player can get next to `obj` without going around a wall: it's
+// adjacent, or a free hex next to the player is next to it too. (Straight
+// hex distance alone would reach through walls.)
+static bool gmouse_near_reachable(Object* obj, int distance)
+{
+    if (distance <= 1) {
+        return true;
+    }
+
+    for (int rotation = 0; rotation < ROTATION_COUNT; rotation++) {
+        int tile = tile_num_in_direction(obj_dude->tile, rotation, 1);
+        if (hexGridTileIsValid(tile)
+            && tile_dist(tile, obj->tile) == 1
+            && obj_blocking_at(obj_dude, tile, obj_dude->elevation) == NULL) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The objects A could act on now, with a score (lower is better: nearer,
+// then more in front of the player) and screen position. Sets *nearExists
+// when the current target is still on the map nearby (so it's safe to touch).
+static int gmouse_near_candidates(Object** out, int* scores, int* xs, int* ys, bool* nearExists)
+{
+    static Object* objects[POINTER_ASSIST_MAX_OBJECTS];
+    int count = obj_list_near_tile(obj_dude->tile, POINTER_ASSIST_HEX_RADIUS, obj_dude->elevation, objects, POINTER_ASSIST_MAX_OBJECTS);
+
+    *nearExists = false;
+    int found = 0;
+    for (int index = 0; index < count; index++) {
+        Object* obj = objects[index];
+        if (obj == gmouse_near) {
+            *nearExists = true;
+        }
+
+        if (found >= GMOUSE_NEAR_MAX_CANDIDATES) {
+            continue;
+        }
+
+        if (obj == obj_dude || !gmouse_pointer_assist_wants(obj, GAME_MOUSE_MODE_ARROW)) {
+            continue;
+        }
+
+        int distance = tile_dist(obj_dude->tile, obj->tile);
+        if (distance > GMOUSE_NEAR_RANGE || !gmouse_near_reachable(obj, distance)) {
+            continue;
+        }
+
+        // On screen and not under a roof, as for the pointer.
+        int x;
+        int y;
+        if (!gmouse_target_on_screen(obj, &x, &y)) {
+            continue;
+        }
+
+        int turn = 0;
+        if (distance > 0) {
+            turn = std::abs(tile_dir(obj_dude->tile, obj->tile) - obj_dude->rotation);
+            if (turn > ROTATION_COUNT / 2) {
+                turn = ROTATION_COUNT - turn;
+            }
+        }
+
+        out[found] = obj;
+        scores[found] = distance * 4 + turn * 3;
+        xs[found] = x;
+        ys[found] = y;
+        found++;
+    }
+    return found;
+}
+
+// What A does to `obj`, for its label (gmouse_default_action).
+static const char* gmouse_near_verb(Object* obj)
+{
+    switch (FID_TYPE(obj->fid)) {
+    case OBJ_TYPE_ITEM:
+        return "Take";
+    case OBJ_TYPE_CRITTER:
+        return obj_action_can_talk_to(obj) ? "Talk" : "Search";
+    case OBJ_TYPE_SCENERY:
+        if (obj_is_openable(obj)) {
+            return obj_is_open(obj) ? "Close" : "Open";
+        }
+        return "Use";
+    }
+    return "Look";
+}
+
+// Floats "<verb>: <name>" over the new target, like a speech line (it fades
+// on the usual timer).
+static void gmouse_near_label()
+{
+    char text[80];
+    const char* name = object_name(gmouse_near);
+    snprintf(text, sizeof(text), "%s: %s", gmouse_near_verb(gmouse_near), name != NULL ? name : "");
+
+    // Just over the object's sprite rather than at critter height (an item
+    // on the ground would get its label over the player's head). No label
+    // while the object is saying something (it would replace that).
+    Rect bounds;
+    int tileX;
+    int tileY;
+    obj_bound(gmouse_near, &bounds);
+    if (tile_coord(gmouse_near->tile, &tileX, &tileY, gmouse_near->elevation) != 0) {
+        return;
+    }
+
+    Rect rect;
+    if (text_object_create_label(gmouse_near, text, 101, colorTable[32747], colorTable[0], tileY - bounds.uly + 4, &rect) == 0) {
+        gmouse_near_labelled = true;
+        tile_refresh_rect(&rect, gmouse_near->elevation);
+    }
+}
+
+static void gmouse_near_set(Object* obj, bool locked)
+{
+    if (obj != gmouse_near) {
+        gmouse_near_clear(true);
+        gmouse_near = obj;
+        if (gmouse_near != NULL) {
+            gmouse_near_label();
+        }
+    }
+
+    gmouse_near_locked = locked && obj != NULL;
+    if (gmouse_near_locked) {
+        gmouse_near_lock_tile = obj_dude->tile;
+    }
+
+    if (gmouse_near != NULL && (gmouse_near->outline & OUTLINE_TYPE_MASK) == 0) {
+        Rect rect;
+        if (obj_outline_object(gmouse_near, OUTLINE_TYPE_ITEM, &rect) == 0) {
+            gmouse_near_outlined = true;
+            tile_refresh_rect(&rect, gmouse_near->elevation);
+        }
+    }
+}
+
+bool gmouse_walk_allowed()
+{
+    return gmouse_initialized
+        && gmouse_enabled
+        && gmouse_mapper_mode == 0
+        && gmouse_current_cursor < FIRST_GAME_MOUSE_ANIMATED_CURSOR;
+}
+
+bool gmouse_walk_pointer_hidden()
+{
+    return gmouse_walk_hidden;
+}
+
+void gmouse_walk_hide_pointer()
+{
+    if (gmouse_walk_hidden || !gmouse_initialized) {
+        return;
+    }
+
+    gmouse_walk_hidden = true;
+    gmouse_clear_target(true);
+    if (outlined_object != NULL) {
+        gmouse_remove_item_outline(outlined_object);
+    }
+    gmouse_hide_pan_cursor();
+    gmouse_3d_off();
+    mouse_hide();
+}
+
+void gmouse_walk_show_pointer(bool atPlayer)
+{
+    if (!gmouse_walk_hidden) {
+        return;
+    }
+
+    gmouse_walk_hidden = false;
+    gmouse_near_clear(true);
+
+    // Back on the hex in front of the player (their own hex would show the
+    // can't-walk-here cursor).
+    if (atPlayer && obj_dude != NULL) {
+        int tile = tile_num_in_direction(obj_dude->tile, obj_dude->rotation, 1);
+        if (!hexGridTileIsValid(tile)) {
+            tile = obj_dude->tile;
+        }
+        int x;
+        int y;
+        if (tile_coord(tile, &x, &y, obj_dude->elevation) == 0) {
+            mouse_set_position(x + 16, y + 8);
+        }
+    }
+
+    mouse_show();
+}
+
+void gmouse_near_target_update(bool enabled)
+{
+    if (!enabled || !gmouse_walk_hidden || obj_dude == NULL) {
+        gmouse_near_clear(true);
+        return;
+    }
+
+    Object* candidates[GMOUSE_NEAR_MAX_CANDIDATES];
+    int scores[GMOUSE_NEAR_MAX_CANDIDATES];
+    int xs[GMOUSE_NEAR_MAX_CANDIDATES];
+    int ys[GMOUSE_NEAR_MAX_CANDIDATES];
+    bool nearExists;
+    int count = gmouse_near_candidates(candidates, scores, xs, ys, &nearExists);
+
+    // Only ever touch the previous one if it's still on the map.
+    if (!nearExists) {
+        gmouse_near_clear(false);
+    }
+
+    Object* best = NULL;
+    int bestScore = 0;
+    bool lockedStillThere = false;
+    for (int index = 0; index < count; index++) {
+        if (candidates[index] == gmouse_near) {
+            lockedStillThere = true;
+        }
+        if (best == NULL || scores[index] < bestScore) {
+            best = candidates[index];
+            bestScore = scores[index];
+        }
+    }
+
+    // A d-pad pick holds until the player moves or it drops out of reach.
+    if (gmouse_near_locked && lockedStillThere && obj_dude->tile == gmouse_near_lock_tile) {
+        gmouse_near_set(gmouse_near, true);
+        return;
+    }
+
+    gmouse_near_set(best, false);
+}
+
+bool gmouse_near_target_step(int dirX, int dirY)
+{
+    if (!gmouse_walk_hidden || obj_dude == NULL) {
+        return false;
+    }
+
+    Object* candidates[GMOUSE_NEAR_MAX_CANDIDATES];
+    int scores[GMOUSE_NEAR_MAX_CANDIDATES];
+    int xs[GMOUSE_NEAR_MAX_CANDIDATES];
+    int ys[GMOUSE_NEAR_MAX_CANDIDATES];
+    bool nearExists;
+    int count = gmouse_near_candidates(candidates, scores, xs, ys, &nearExists);
+    if (!nearExists) {
+        gmouse_near_clear(false);
+    }
+
+    // From the current target (or the player), the nearest candidate in the
+    // pressed direction, within about 55 degrees of it.
+    int fromX;
+    int fromY;
+    bool fromTarget = false;
+    for (int index = 0; index < count; index++) {
+        if (candidates[index] == gmouse_near) {
+            fromX = xs[index];
+            fromY = ys[index];
+            fromTarget = true;
+        }
+    }
+    if (!fromTarget) {
+        if (tile_coord(obj_dude->tile, &fromX, &fromY, obj_dude->elevation) != 0) {
+            return true;
+        }
+        fromX += 16;
+        fromY -= 20;
+    }
+
+    float length = std::sqrt((float)(dirX * dirX + dirY * dirY));
+    if (length <= 0.0f) {
+        return true;
+    }
+    float ux = (float)dirX / length;
+    float uy = (float)dirY / length;
+
+    Object* best = NULL;
+    float bestScore = 0.0f;
+    for (int index = 0; index < count; index++) {
+        if (candidates[index] == gmouse_near) {
+            continue;
+        }
+        float vx = (float)(xs[index] - fromX);
+        float vy = (float)(ys[index] - fromY);
+        float along = vx * ux + vy * uy;
+        float across = std::fabs(vx * uy - vy * ux);
+        if (along < 4.0f || across > along * 1.4f) {
+            continue;
+        }
+        float score = along + 2.0f * across;
+        if (best == NULL || score < bestScore) {
+            best = candidates[index];
+            bestScore = score;
+        }
+    }
+
+    if (best != NULL) {
+        gmouse_near_set(best, true);
+    }
+    // The d-pad belongs to the targets while the pointer is hidden, even
+    // when there's nothing that way.
+    return true;
+}
+
+bool gmouse_near_target_use()
+{
+    if (!gmouse_walk_hidden || gmouse_near == NULL) {
+        return false;
+    }
+
+    // Drop the outline first: dialogue takes its picture of the map when it
+    // opens, outline and all.
+    Object* target = gmouse_near;
+    gmouse_near_clear(true);
+    gmouse_default_action(target);
+    return true;
+}
+
+bool gmouse_near_target_menu(bool (*held)())
+{
+    if (!gmouse_walk_hidden || gmouse_near == NULL) {
+        return false;
+    }
+
+    Object* target = gmouse_near;
+    int x;
+    int y;
+    if (!gmouse_target_on_screen(target, &x, &y)) {
+        return false;
+    }
+
+    // The menu is drawn by the hex cursor object and read from the mouse,
+    // so bring both back, on the target.
+    gmouse_near_clear(true);
+    gmouse_walk_hidden = false;
+    mouse_set_position(x, y);
+    mouse_show();
+    gmouse_3d_on();
+
+    gmouse_action_menu(target, x, y, held);
+
+    // Back to walking with the pointer out of the way.
+    gmouse_walk_hide_pointer();
     return true;
 }
 #endif

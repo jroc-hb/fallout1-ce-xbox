@@ -103,6 +103,10 @@ static int outlineCount = 0;
 // 0x505BA0
 static ObjectListNode* floatingObjects = NULL;
 
+// CE: Draw the hex cursor object again on top of everything (see
+// obj_set_mouse_flat_on_top).
+static bool obj_mouse_flat_on_top = false;
+
 // 0x505BA4
 static int centerToUpperLeft = 0;
 
@@ -918,6 +922,19 @@ void obj_render_post_roof(Rect* rect, int elevation)
         }
         objectListNode = objectListNode->next;
     }
+
+    // CE: The action menu is drawn by the hex cursor object, a flat object
+    // rendered with the floor, so walls, roofs and sprites lower on the
+    // screen covered parts of it (an NPC indoors). While it's open, draw it
+    // again last, fully lit.
+    if (obj_mouse_flat_on_top && (obj_mouse_flat->flags & OBJECT_HIDDEN) == 0) {
+        obj_render_object(obj_mouse_flat, &updatedRect, 0x10000);
+    }
+}
+
+void obj_set_mouse_flat_on_top(bool onTop)
+{
+    obj_mouse_flat_on_top = onTop;
 }
 
 // 0x47B878

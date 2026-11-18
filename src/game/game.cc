@@ -41,6 +41,7 @@
 #include "game/skill.h"
 #include "game/skilldex.h"
 #include "game/stat.h"
+#include "game/stickwalk.h"
 #include "game/tile.h"
 #include "game/trait.h"
 #include "game/version.h"
@@ -459,6 +460,14 @@ void game_exit()
 // 0x43B748
 int game_handle_input(int eventCode, bool isInCombatMode)
 {
+#ifdef NXDK
+    // A pressed with the pointer hidden by stick walking: act here, where
+    // mouse clicks are handled.
+    if (!isInCombatMode) {
+        stick_walk_run_pending();
+    }
+#endif
+
     // NOTE: Uninline.
     if (game_state() == GAME_STATE_5) {
         dialogue_system_enter();

@@ -98,6 +98,7 @@ namespace fallout {
 #define GAME_CONFIG_POINTER_ASSIST_KEY "pointer_assist"
 #define GAME_CONFIG_EDGE_SCROLL_KEY "edge_scroll"
 #define GAME_CONFIG_SWAP_STICKS_KEY "swap_sticks"
+#define GAME_CONFIG_STICK_WALK_KEY "stick_walk"
 #define GAME_CONFIG_RUMBLE_KEY "rumble"
 #define GAME_CONFIG_POINTER_HAPTICS_KEY "pointer_haptics"
 #endif

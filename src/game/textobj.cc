@@ -20,6 +20,8 @@ namespace fallout {
 typedef enum TextObjectFlags {
     TEXT_OBJECT_MARKED_FOR_REMOVAL = 0x01,
     TEXT_OBJECT_UNBOUNDED = 0x02,
+    // CE: a stick-walking target label (text_object_create_label).
+    TEXT_OBJECT_LABEL = 0x04,
 } TextObjectFlags;
 
 typedef struct TextObject {
@@ -493,6 +495,60 @@ static void text_object_get_offset(TextObject* textObject)
 // Marks text objects attached to `object` for removal.
 //
 // 0x49D848
+// CE: A label for `object` (the stick-walking target, gmouse.cc), `lift`
+// pixels above its hex instead of the usual 60 (critter height). An object
+// has only one text: so as not to replace something it's saying, there's no
+// label while it shows any other text. `rect` gets the area to refresh
+// (the label's old and new positions).
+int text_object_create_label(Object* object, char* string, int font, int color, int outlineColor, int lift, Rect* rect)
+{
+    for (int index = 0; index < text_object_index; index++) {
+        TextObject* textObject = text_object_list[index];
+        if (textObject->owner == object
+            && (textObject->flags & (TEXT_OBJECT_MARKED_FOR_REMOVAL | TEXT_OBJECT_LABEL)) == 0) {
+            return -1;
+        }
+    }
+
+    if (text_object_create(object, string, font, color, outlineColor, rect) != 0) {
+        return -1;
+    }
+
+    // text_object_create appends it.
+    TextObject* textObject = text_object_list[text_object_index - 1];
+    textObject->flags |= TEXT_OBJECT_LABEL;
+
+    int tileScreenX;
+    int tileScreenY;
+    tile_coord(textObject->tile, &tileScreenX, &tileScreenY, map_elevation);
+    int y = tileScreenY - textObject->height - lift;
+    if (y >= 0 && y + textObject->height - 1 < display_height) {
+        textObject->y = y;
+        textObject->sy = y - tileScreenY;
+        if (rect != NULL) {
+            Rect lifted;
+            lifted.ulx = textObject->x;
+            lifted.uly = textObject->y;
+            lifted.lrx = textObject->x + textObject->width - 1;
+            lifted.lry = textObject->y + textObject->height - 1;
+            rect_min_bound(rect, &lifted, rect);
+        }
+    }
+
+    return 0;
+}
+
+// CE: Removes `object`'s label, and only that (not something it says).
+void text_object_remove_label(Object* object)
+{
+    for (int index = 0; index < text_object_index; index++) {
+        TextObject* textObject = text_object_list[index];
+        if (textObject->owner == object && (textObject->flags & TEXT_OBJECT_LABEL) != 0) {
+            textObject->flags |= TEXT_OBJECT_MARKED_FOR_REMOVAL;
+        }
+    }
+}
+
 void text_object_remove(Object* object)
 {
     int index;

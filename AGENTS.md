@@ -211,9 +211,104 @@ applies, BACK (`b`) cancels; the mouse works on the knobs, sliders and buttons t
   `SAFE_AREA` 0-8) and `fallout.cfg` `[control]` keys. Changing DISPLAY or SAFE AREA relaunches
   `default.xbe`.
 - `[control] edge_scroll` (default 1) gates `gmouse_check_scrolling` via `gmouse_set_edge_scroll`.
-  `[control] swap_sticks` (default 0) remaps the stick axes and stick clicks at the top of the
-  gamepad axis/button handlers, so everything downstream (deadzones, pointer, panning) just sees
-  "pointer stick" and "camera stick".
+  `[control] swap_sticks` (default 0) remaps the stick axes at the top of the gamepad axis
+  handler (`SticksSwapped()`: also always on in walk mode), so everything downstream (deadzones,
+  pointer, panning) just sees "pointer stick" and "camera stick".
+- Stick clicks go by the physical stick, whatever the swap: the **left click toggles walk mode**
+  (`GamepadToggleStickWalk`: saves `[control] stick_walk` with `gconfig_save`, prints "Controls:
+  walk with the left stick." / "Controls: pointer." in the message box, plays the haptic tick).
+  The **right click** is the Skilldex (S) in walk mode (the camera follows the player and the
+  pointer to reach the HUD button is hidden) and centers the camera (Home) otherwise; its
+  release sends the same key it pressed. The old left click (Skilldex, or centering when
+  swapped) is gone.
+
+**Stick walking** (prototype; `game/stickwalk.cc`): walk mode, toggled in-game with the left stick
+click (`[control] stick_walk`, default 0; it used to be SWAP STICKS = WALK / `swap_sticks=2`,
+which `GamepadInit` migrates to `swap_sticks=1 stick_walk=1`). Like the Beamdog console ports'
+Drive/Tactics modes. The sticks are swapped (pointer on the right) and, outside combat on the map
+view, the camera stick walks the player directly, console-Diablo style. `stick_walk_update` returns what the stick
+should do otherwise: in combat on the map view it pans as usual (`STICK_WALK_PAN`); in menus,
+dialogue or any window over the map center it moves the pointer too (`STICK_WALK_POINTER`:
+`gCameraStickPointer`, and `ProcessLeftStick` uses whichever stick is pushed further), so it
+never pans the map behind a menu (user request). Verified: no map movement behind the
+inventory while the left stick moved the pointer.
+- No path planning. The engine walk (`object_move`, anim.cc) moves a critter to the next hex when
+  its pixel offset passes the step, then reads the next direction from `rotations[]`. There
+  `anim_set_dude_steer`'s hook asks `sw_steer` for the next hex and rewrites the path to that one
+  step, so the walk cycle never restarts. Unextended, a walk ends at the hex being entered, which
+  is how releasing the stick stops (and a blocked next hex).
+- The next hex: of the free neighbours within ~87 degrees of the stick, the one nearest a point
+  64 px ahead on a line through the hex where the stick was last turned (>20 degrees). Hexes have
+  no up/down neighbour, so straight up alternates NE/NW and stays on the line. 45 degrees walks
+  plain NE (37 degrees); anything steeper than ~55 mixes in NW. Slanted walls are slid along;
+  perpendicular ones stop the walk. Closed doors block: the engine never auto-opens doors for
+  the dude (`anim_can_use_door`), so they're opened with the pointer as before.
+- Deflection >= 0.85 runs, less walks; it switches at hex boundaries (art changed in the hook,
+  frame scaled to the same share of the new cycle so the stride carries on). Sneaking or a
+  crippled leg always walks.
+- Turning back mid-step: `anim_dude_turn` (`sw_turn`) is asked every frame of the step. If the
+  stick points within ~60 degrees of straight back, the step is less than half done and the hex
+  behind is free, the step is turned around in place (rotation flipped, path set to the reverse).
+  The player is still on the step's start hex, so it is a normal step to the hex behind and no
+  offsets need fixing. Only exact reversals: other angles would leave a sideways pixel offset.
+  Past halfway it waits for the boundary, so a new direction takes at most half a step.
+- Walking into a closed door (within ~55 degrees of the stick, blocking the next hex) runs
+  `action_use_an_object` on it, once per stick push (a locked door's message doesn't repeat).
+  Verified: walking into the Cathedral door opened it and walked through to the interior.
+- Pushing the stick during a clicked walk takes it over at the next hex; during another
+  animation it waits for it to end. A walk with no stick update for 200 ms stops.
+- The camera follows with `map_scroll_pixels`, closing 8x the distance per second, until the
+  player's feet are within 2 px of a point one hex (24 px, `kFollowDropY`) below the map view
+  center (user request; or the map edge stops it). A look-ahead
+  in the walking direction was tried and removed: the user found it distracting.
+- Verified in XEMU (2026-11-17, TMPWALK logs): one register per push, steady steering; down and up
+  zig-zag SE/SW and NE/NW; walk -> run -> walk without a stop; stops at the building wall; no
+  walking with the inventory open. Not done: combat movement, feel on real hardware.
+- **Hidden pointer and A to use** (gmouse.cc `gmouse_walk_*`, `gmouse_near_target_*`). Walking
+  with the stick hides the pointer (`gmouse_walk_hide_pointer`): `gmouse_bk_process` returns early
+  (no cursor, hex cursor, hover outline, action popup or edge scroll) and `gmouse_handle_event`
+  ignores clicks. Any pointer-stick movement brings it back on the hex in front of the player; so
+  do the d-pad target jump, a disallowed state (dialog, combat, window over the map, wait cursor;
+  `stick_walk_update` shows it) and turning walk mode off.
+- While hidden, the nearest pickable object within 2 hexes (`gmouse_pointer_assist_wants` in
+  ARROW mode, on screen, not under a roof; score distance*4 + turns away from the player's facing
+  *3) gets the gold item outline and a floating "<verb>: <name>" label (Take / Talk / Search /
+  Open / Close / Use / Look, English only; `text_object_create_label` in textobj.cc: placed just
+  above the sprite instead of 60 px up, fades on the usual float timer). An object has only one
+  floating text and creating one replaces it, so labels are flagged (`TEXT_OBJECT_LABEL`), only
+  `text_object_remove_label` removes them, and no label is made while the object shows other
+  text: otherwise the label came back on an NPC right after you talked to it and wiped its reply
+  after a split second (user report; verified fixed with a test float).
+  Reachability: at distance 2 a free hex must be next to both the player and the object, so
+  nothing is picked through a wall.
+- The d-pad steps the highlight to the nearest candidate in that direction (`gmouse_jump_to_target`
+  routes to `gmouse_near_target_step` while hidden; the pointer jump is unchanged when visible).
+  A pick stays until the player moves to another hex or it leaves reach.
+- A or RT (`ProcessTriggers`, which then sends no click): a tap (released before 350 ms) uses the
+  target with `gmouse_default_action`, the same switch as an arrow click (pick up, talk/loot,
+  use, look). Holding opens the action menu on it (`gmouse_action_menu`, the hold-click menu
+  factored out of `gmouse_handle_event`; it takes a `held` callback, here `GamepadClickHeld`, and
+  the d-pad now moves its selection too; it also clamps the index, which could run off the list
+  before). The menu is drawn by the flat hex cursor object, which renders with the floor, so
+  walls, roofs and sprites lower on screen covered it (an NPC indoors); while it's open
+  `obj_set_mouse_flat_on_top` makes `obj_render_post_roof` draw it again last, fully lit (mouse
+  and pad alike). The target's label stays up during the menu (text removal is a bk process,
+  which the menu pauses) and goes when it closes. Both run from `game_handle_input` (`stick_walk_run_pending`), where clicks are handled;
+  `sw_in_menu` keeps the menu's nested input loop from re-entering stick walking. The outline is
+  removed before acting (dialogue snapshots the map view when it opens, outline included) and
+  isn't shown again until the player is idle or the stick moves. Objects flagged
+  `OBJECT_NO_HIGHLIGHT` can be targeted but not outlined. Decorative scenery (e.g. the trash
+  bins outside the Cathedral) has no use action and is skipped. The previous target is only
+  touched if it's still in the 8-hex object list; `gmouse_forget_target` and `gmouse_reset` clear
+  it too.
+- Verified in XEMU: guard outlined, A opened dialogue without the outline in its view, outline
+  gone after; Cathedral door outlined, A went through it; pointer hidden while walking and back
+  in front of the player on a right-stick nudge; A with the pointer visible is a normal click.
+  Later (with a temporary key dropping a pistol and ammo next to the player): labels "Take: 10mm
+  JHP" / "Take: 10mm Pistol" just above the items, d-pad right/left switched between them, taps
+  of A picked both up; holding A on a guard opened the menu, d-pad down + release did Look ("You
+  see a zombie"). Reversal fired at offset 14/32 and was skipped past halfway. Not tested: the
+  reachability check against a real wall.
 
 **Display scaling and safe area** (`svgaComputeLayout`, svga.cc). The window is the video mode
 (480p/720p); the game draws at a smaller "game size" that every window, the mouse and `scr_size`

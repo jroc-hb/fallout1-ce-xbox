@@ -123,6 +123,7 @@ bool gconfig_init(bool isMapper, int argc, char** argv)
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_RUMBLE_KEY, 100);
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_POINTER_HAPTICS_KEY, 0);
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_SWAP_STICKS_KEY, 0);
+    config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_STICK_WALK_KEY, 0);
 #endif
 
     if (isMapper) {

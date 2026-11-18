@@ -199,6 +199,8 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/game/worldmap.h"
     "src/game/rumble.cc"
     "src/game/rumble.h"
+    "src/game/stickwalk.cc"
+    "src/game/stickwalk.h"
     "src/game/xboxopts.cc"
     "src/game/xboxopts.h"
     "src/int/audio.cc"

@@ -34,6 +34,11 @@ void GamepadRumbleAtStrength(float low, float high, int durationMs, int strength
 void GamepadPointerHapticTick(int strength);
 // Stops a rumble whose time is up; call every frame.
 void GamepadRumbleUpdate();
+// Whether A or RT (the gamepad's left click) is down right now.
+bool GamepadClickHeld();
+// Switches walk mode (left stick walks the player) on or off, saves it and
+// says so in the message box. Bound to the left stick click.
+void GamepadToggleStickWalk();
 
 } // namespace fallout
 

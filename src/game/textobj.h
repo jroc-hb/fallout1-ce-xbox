@@ -20,6 +20,8 @@ int text_object_create(Object* object, char* string, int font, int color, int a5
 void text_object_render(Rect* rect);
 int text_object_count();
 void text_object_remove(Object* object);
+int text_object_create_label(Object* object, char* string, int font, int color, int outlineColor, int lift, Rect* rect);
+void text_object_remove_label(Object* object);
 
 } // namespace fallout
 

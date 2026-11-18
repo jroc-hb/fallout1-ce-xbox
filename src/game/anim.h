@@ -168,6 +168,17 @@ int anim_change_fid(Object* obj, int animationSequenceIndex, int fid);
 void anim_stop();
 unsigned int compute_tpf(Object* object, int fid);
 
+// Steers the player's walk one hex at a time (stick walking, stickwalk.cc).
+// Called each time the player's walk reaches a new hex: return the rotation
+// of the next hex to walk to (and set *anim to ANIM_WALK or ANIM_RUNNING), or
+// -1 to leave the walk as it is.
+typedef int AnimDudeSteerProc(Object* obj, int* anim);
+// Called every frame of the player's walk, mid-step: return a rotation to
+// turn the step around immediately (only the reverse of `rotation` is
+// supported, so the walk stays on its hex line), or -1.
+typedef int AnimDudeTurnProc(Object* obj, int rotation);
+void anim_set_dude_steer(AnimDudeSteerProc* steer, AnimDudeTurnProc* turn);
+
 } // namespace fallout
 
 #endif /* FALLOUT_GAME_ANIMATION_H_ */

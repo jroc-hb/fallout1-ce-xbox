@@ -10,9 +10,11 @@
 #include "plib/gnw/svga.h"
 #include "plib/gnw/dxinput.h"
 #include "plib/gnw/input.h"
+#include "game/display.h"
 #include "game/gconfig.h"
 #include "game/gmouse.h"
 #include "game/map.h"
+#include "game/stickwalk.h"
 
 // Based on glebm's initial mouse support PR https://github.com/alexbatalov/fallout1-ce/pull/118
 
@@ -48,6 +50,14 @@ static bool gPointerAssist            = true;
 // Pointer on the right stick, camera on the left (XBOX OPTS "SWAP STICKS",
 // [control] swap_sticks). The stick clicks swap with them.
 static bool gSwapSticks               = false;
+// Walk mode: the left stick walks the player outside combat and the pointer
+// is on the right stick, whatever SWAP STICKS says (stickwalk.cc). Toggled
+// in-game with the left stick click and saved as [control] stick_walk.
+static bool gStickWalk                = false;
+// WALK, outside the map view (menus, dialogue): the camera (movement) stick
+// moves the pointer too. Set by ProcessRightStick, read by ProcessLeftStick
+// the next frame.
+static bool gCameraStickPointer       = false;
 // Rumble strength 0-100, 0 = off (XBOX OPTS "RUMBLE", [control] rumble).
 static int gRumbleStrength            = 100;
 // A short buzz when the pointer moves onto something clickable (XBOX OPTS
@@ -213,25 +223,17 @@ void ReleaseChordKey()
 
 float leftStickX, leftStickY, rightStickX, rightStickY;
 
-// With the sticks swapped, the stick clicks follow their stick: the camera
-// stick's click still centers the camera.
-static int SwapStickButton(int button)
+// The sticks are swapped by SWAP STICKS, and always in walk mode (pointer on
+// the right, movement on the left).
+static bool SticksSwapped()
 {
-    if (gSwapSticks) {
-        if (button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
-            return SDL_GAMEPAD_BUTTON_RIGHT_STICK;
-        }
-        if (button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
-            return SDL_GAMEPAD_BUTTON_LEFT_STICK;
-        }
-    }
-    return button;
+    return gSwapSticks || gStickWalk;
 }
 
 void HandleControllerAxisMotion(const SDL_Event& event)
 {
     int axis = event.gaxis.axis;
-    if (gSwapSticks) {
+    if (SticksSwapped()) {
         switch (axis) {
         case SDL_GAMEPAD_AXIS_LEFTX: axis = SDL_GAMEPAD_AXIS_RIGHTX; break;
         case SDL_GAMEPAD_AXIS_LEFTY: axis = SDL_GAMEPAD_AXIS_RIGHTY; break;
@@ -288,11 +290,50 @@ void HandleControllerAxisMotion(const SDL_Event& event)
 }
 
 
+// The key the right stick click sent (it depends on the mode), so its
+// release matches.
+static SDL_Scancode gRightStickClickKey = SDL_SCANCODE_UNKNOWN;
+
+void GamepadToggleStickWalk()
+{
+    const bool wasSwapped = SticksSwapped();
+    gStickWalk = !gStickWalk;
+    if (SticksSwapped() != wasSwapped) {
+        // The pointer moves to the other stick: drop what both were holding.
+        leftStickXUnscaled = leftStickYUnscaled = rightStickXUnscaled = rightStickYUnscaled = 0.0f;
+        ScaleLeftJoystick();
+        ScaleRightJoystick();
+    }
+
+    config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_STICK_WALK_KEY, gStickWalk ? 1 : 0);
+    gconfig_save();
+
+    char message[80];
+    snprintf(message, sizeof(message), "%s",
+        gStickWalk ? "Controls: walk with the left stick." : "Controls: pointer.");
+    display_print(message);
+    GamepadPointerHapticTick(gRumbleStrength);
+    debug_printf("Gamepad: stick_walk=%d\n", gStickWalk ? 1 : 0);
+}
+
 void HandleControllerButtonUp(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
 
-    switch (SwapStickButton(event.gbutton.button)) {
+    // Stick clicks go by the physical stick (see HandleControllerButtonDown).
+    if (event.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
+        return;
+    }
+    if (event.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
+        if (gRightStickClickKey != SDL_SCANCODE_UNKNOWN) {
+            simulatedKeyboardKey = {gRightStickClickKey, 0};
+            GNW95_process_key(&simulatedKeyboardKey);
+            gRightStickClickKey = SDL_SCANCODE_UNKNOWN;
+        }
+        return;
+    }
+
+    switch (event.gbutton.button) {
     case SDL_GAMEPAD_BUTTON_SOUTH: // Left Mouse Click
         gAButtonHeld = false;
         break;
@@ -318,16 +359,6 @@ void HandleControllerButtonUp(const SDL_Event& event)
 
     case SDL_GAMEPAD_BUTTON_START: // Options Menu (Esc)
         simulatedKeyboardKey = {SDL_SCANCODE_ESCAPE, 0};
-        GNW95_process_key(&simulatedKeyboardKey);
-        break;
-
-    case SDL_GAMEPAD_BUTTON_LEFT_STICK: // Skilldex (S)
-        simulatedKeyboardKey = {SDL_SCANCODE_S, 0};
-        GNW95_process_key(&simulatedKeyboardKey);
-        break;
-
-    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: // Center Camera on Player (Home)
-        simulatedKeyboardKey = {SDL_SCANCODE_HOME, 0};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -392,7 +423,23 @@ void HandleControllerButtonUp(const SDL_Event& event)
 void HandleControllerButtonDown(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
-    switch (SwapStickButton(event.gbutton.button)) {
+
+    // Stick clicks go by the physical stick, whatever the swap:
+    // - left: toggles walk mode;
+    // - right: the Skilldex while walking (the camera follows the player
+    //   then, and the pointer to reach the HUD's button is hidden), otherwise
+    //   centers the camera on the player.
+    if (event.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
+        GamepadToggleStickWalk();
+        return;
+    }
+    if (event.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
+        gRightStickClickKey = gStickWalk ? SDL_SCANCODE_S : SDL_SCANCODE_HOME;
+        simulatedKeyboardKey = {gRightStickClickKey, 1};
+        GNW95_process_key(&simulatedKeyboardKey);
+        return;
+    }
+    switch (event.gbutton.button) {
     case SDL_GAMEPAD_BUTTON_SOUTH: // Left Click
         gAButtonHeld = true;
         break;
@@ -418,16 +465,6 @@ void HandleControllerButtonDown(const SDL_Event& event)
 
     case SDL_GAMEPAD_BUTTON_START: // Options Menu (Esc)
         simulatedKeyboardKey = {SDL_SCANCODE_ESCAPE, 1};
-        GNW95_process_key(&simulatedKeyboardKey);
-        break;
-
-    case SDL_GAMEPAD_BUTTON_LEFT_STICK: // Skilldex (S)
-        simulatedKeyboardKey = {SDL_SCANCODE_S, 1};
-        GNW95_process_key(&simulatedKeyboardKey);
-        break;
-
-    case SDL_GAMEPAD_BUTTON_RIGHT_STICK: // Center Camera on Player (Home)
-        simulatedKeyboardKey = {SDL_SCANCODE_HOME, 1};
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
@@ -543,8 +580,19 @@ void GamepadInit()
 
     int swapSticks = gSwapSticks ? 1 : 0;
     config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_SWAP_STICKS_KEY, &swapSticks);
-    if ((swapSticks != 0) != gSwapSticks) {
-        gSwapSticks = swapSticks != 0;
+    int stickWalk = gStickWalk ? 1 : 0;
+    config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_STICK_WALK_KEY, &stickWalk);
+    // Walk mode used to be swap_sticks = 2.
+    if (swapSticks == 2) {
+        swapSticks = 1;
+        stickWalk = 1;
+        config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_SWAP_STICKS_KEY, swapSticks);
+        config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_STICK_WALK_KEY, stickWalk);
+    }
+    const bool wasSwapped = SticksSwapped();
+    gSwapSticks = swapSticks != 0;
+    gStickWalk = stickWalk != 0;
+    if (SticksSwapped() != wasSwapped) {
         // Drop whatever each stick was holding; new events will come in on
         // the other one.
         leftStickXUnscaled = leftStickYUnscaled = rightStickXUnscaled = rightStickYUnscaled = 0.0f;
@@ -566,7 +614,7 @@ void GamepadInit()
         gLeftStickDeadzonePercent, gRightStickDeadzonePercent,
         gLeftStickSensitivity, gLeftStickPixelsPerSecond,
         gRightStickSensitivity, gRightStickInternalDivisor);
-    debug_printf("Gamepad config: center_cursor=%d pointer_assist=%d edge_scroll=%d swap_sticks=%d\n", gRightStickCenterCursor ? 1 : 0, gPointerAssist ? 1 : 0, edgeScroll != 0 ? 1 : 0, gSwapSticks ? 1 : 0);
+    debug_printf("Gamepad config: center_cursor=%d pointer_assist=%d edge_scroll=%d swap_sticks=%d stick_walk=%d\n", gRightStickCenterCursor ? 1 : 0, gPointerAssist ? 1 : 0, edgeScroll != 0 ? 1 : 0, gSwapSticks ? 1 : 0, gStickWalk ? 1 : 0);
     debug_printf("Gamepad config: rumble=%d pointer_haptics=%d\n", gRumbleStrength, gPointerHaptics ? 1 : 0);
 }
 
@@ -661,10 +709,29 @@ void ProcessLeftStick()
     const float dt = std::min(static_cast<float>(now - lastTicks) / 1000000000.0f, 0.05f);
     lastTicks = now;
 
+    // The pointer stick, or with WALK in a menu whichever stick is pushed
+    // further (both move the pointer there).
+    float stickX = leftStickX;
+    float stickY = leftStickY;
+    if (gCameraStickPointer
+        && rightStickX * rightStickX + rightStickY * rightStickY > stickX * stickX + stickY * stickY) {
+        stickX = rightStickX;
+        stickY = rightStickY;
+    }
+
     // Deflection past the deadzone, 0..1.
-    const float length = std::sqrt(leftStickX * leftStickX + leftStickY * leftStickY);
+    const float length = std::sqrt(stickX * stickX + stickY * stickY);
     const float magnitude = std::min(1.0f, length);
     if (magnitude <= 0.0f) {
+        remainderX = 0.0f;
+        remainderY = 0.0f;
+        return;
+    }
+
+    // Moving the pointer brings it back if stick walking hid it, on the
+    // player.
+    if (gmouse_walk_pointer_hidden()) {
+        gmouse_walk_show_pointer(true);
         remainderX = 0.0f;
         remainderY = 0.0f;
         return;
@@ -685,8 +752,8 @@ void ProcessLeftStick()
     const float speedMult = 1.0f - gLeftTriggerValue * 0.75f;
 
     const float pixels = curved * gLeftStickPixelsPerSecond * screenScale * speedMult * dt;
-    float moveX = leftStickX / length * pixels;
-    float moveY = -leftStickY / length * pixels;
+    float moveX = stickX / length * pixels;
+    float moveY = -stickY / length * pixels;
 
     // The button or object the pointer is on, for the haptic tick.
     static const void* lastTarget = nullptr;
@@ -725,6 +792,24 @@ void ProcessRightStick()
     const float dt = std::min(static_cast<float>(now - lastTicks) / 1000000.0f, 50.0f);
     lastTicks = now;
 
+    // WALK: outside combat the camera stick walks the player and the camera
+    // follows; in combat (or with a window open) it pans as usual.
+    gCameraStickPointer = false;
+    if (!gStickWalk) {
+        // The option was turned off while the pointer was hidden.
+        gmouse_walk_show_pointer(false);
+    } else {
+        StickWalkResult result = stick_walk_update(rightStickX, rightStickY, dt / 1000.0f);
+        if (result != STICK_WALK_PAN) {
+            // Walking, or a menu where ProcessLeftStick moves the pointer
+            // with it: never pan the map behind a menu.
+            gCameraStickPointer = result == STICK_WALK_POINTER;
+            remainderX = 0.0f;
+            remainderY = 0.0f;
+            return;
+        }
+    }
+
     if (rightStickX == 0.0f && rightStickY == 0.0f) {
         remainderX = 0.0f;
         remainderY = 0.0f;
@@ -752,6 +837,15 @@ void ProcessRightStick()
     }
 }
 
+// How long A must be held, with the pointer hidden by stick walking, to open
+// the action menu instead of using the object.
+static constexpr Uint64 kWalkMenuHoldMs = 350;
+
+bool GamepadClickHeld()
+{
+    return gRightTriggerValue >= 0.05f || gAButtonHeld;
+}
+
 void ProcessTriggers()
 {
     // Minimum analog value to consider the right trigger "engaged".
@@ -764,7 +858,49 @@ void ProcessTriggers()
         GNW95_process_key(&shiftUp);
         gRightTriggerShiftHeld = false;
     }
-    gGamepadLeftClick = (gRightTriggerValue >= kDeadzone || gAButtonHeld) ? 1 : 0;
+    const bool clickHeld = gRightTriggerValue >= kDeadzone || gAButtonHeld;
+    static bool wasHeld = false;
+    const bool pressed = clickHeld && !wasHeld;
+    const bool released = !clickHeld && wasHeld;
+    wasHeld = clickHeld;
+
+    // Stick walking hid the pointer: a press acts on the object next to the
+    // player instead of clicking wherever the hidden pointer is. A tap uses
+    // it; holding opens its action menu (as holding the mouse button does).
+    static bool ownPress = false; // this press started while hidden
+    static bool menuSent = false;
+    static Uint64 pressTicks = 0;
+    if (gmouse_walk_pointer_hidden()) {
+        if (pressed) {
+            ownPress = true;
+            menuSent = false;
+            pressTicks = SDL_GetTicks();
+        }
+        if (ownPress && clickHeld && !menuSent && SDL_GetTicks() - pressTicks >= kWalkMenuHoldMs) {
+            stick_walk_request_menu();
+            menuSent = true;
+        }
+        if (ownPress && released) {
+            if (!menuSent) {
+                stick_walk_request_use();
+            }
+            ownPress = false;
+        }
+        gGamepadLeftClick = 0;
+        return;
+    }
+
+    // A press that started while hidden (e.g. the one holding the action
+    // menu open) never becomes a click.
+    if (ownPress) {
+        if (clickHeld) {
+            gGamepadLeftClick = 0;
+            return;
+        }
+        ownPress = false;
+    }
+
+    gGamepadLeftClick = clickHeld ? 1 : 0;
 }
 
 

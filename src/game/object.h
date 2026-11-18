@@ -85,6 +85,9 @@ int obj_intersects_with(Object* object, int x, int y);
 // Fills `objects` with up to `capacity` objects on `elevation` standing within
 // `radius` hexes of `tile`; returns how many.
 int obj_list_near_tile(int tile, int radius, int elevation, Object** objects, int capacity);
+// CE: While set, the hex cursor object (which shows the action menu) is
+// drawn over everything else rather than at floor level.
+void obj_set_mouse_flat_on_top(bool onTop);
 int obj_create_intersect_list(int x, int y, int elevation, int objectType, ObjectWithFlags** entriesPtr);
 void obj_delete_intersect_list(ObjectWithFlags** a1);
 void obj_set_seen(int tile);

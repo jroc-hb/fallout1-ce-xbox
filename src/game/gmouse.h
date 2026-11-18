@@ -134,6 +134,28 @@ void gmouse_set_edge_scroll(bool enabled);
 // Drops the d-pad selection if it is `obj` (the object is being removed from
 // the map). Safe to call with any object.
 void gmouse_forget_target(Object* obj);
+
+// Stick walking (stickwalk.cc). The pointer can be hidden while the stick
+// walks the player; it comes back with gmouse_walk_show_pointer (on the
+// hex in front of the player when `atPlayer`), or when the d-pad jumps to a target.
+// gmouse_walk_allowed: the game cursor is in its normal state (not disabled,
+// not the wait cursor).
+bool gmouse_walk_allowed();
+bool gmouse_walk_pointer_hidden();
+void gmouse_walk_hide_pointer();
+void gmouse_walk_show_pointer(bool atPlayer);
+// While hidden: outlines the object A would act on (the nearest within two
+// hexes, preferring what the player faces). Call once a frame; with
+// `enabled` false it just removes the outline.
+void gmouse_near_target_update(bool enabled);
+// Moves the highlight to the next object in d-pad direction (dirX, dirY)
+// (screen space, -1/0/1 each); it stays picked until the player moves.
+bool gmouse_near_target_step(int dirX, int dirY);
+// Does to it what clicking it with the arrow would. False if there is none.
+bool gmouse_near_target_use();
+// Opens the action menu on it (as holding the mouse button on it does);
+// `held` reports whether the button that opened it is still down.
+bool gmouse_near_target_menu(bool (*held)());
 #endif
 
 } // namespace fallout

@@ -301,6 +301,10 @@ static AnimationSequence anim_set[ANIMATION_SEQUENCE_LIST_CAPACITY];
 // Rumble cue for the next registered step (register_rumble_next).
 static int anim_pending_rumble = 0;
 
+// See anim_set_dude_steer.
+static AnimDudeSteerProc* anim_dude_steer = NULL;
+static AnimDudeTurnProc* anim_dude_turn = NULL;
+
 // 0x56A1E4
 static unsigned char seen[5000];
 
@@ -395,6 +399,12 @@ int register_begin(int requestOptions)
 void register_rumble_next(int cue)
 {
     anim_pending_rumble = curr_anim_set != -1 ? rumble_cue_merge(anim_pending_rumble, cue) : 0;
+}
+
+void anim_set_dude_steer(AnimDudeSteerProc* steer, AnimDudeTurnProc* turn)
+{
+    anim_dude_steer = steer;
+    anim_dude_turn = turn;
 }
 
 // Drop a pending cue that no step took.
@@ -2639,6 +2649,24 @@ static void object_move(int index)
     obj_offset(object, frameX, frameY, &temp);
     rect_min_bound(&dirty, &temp, &dirty);
 
+    // Stick walking: turn around mid-step instead of finishing it. The
+    // player is still on the hex the step started from, offset toward the
+    // next one; walking the opposite way from there is a normal step to the
+    // hex behind, so nothing else needs adjusting.
+    if (object == obj_dude && anim_dude_turn != NULL
+        && sad_entry->field_20 >= 0 && sad_entry->field_20 < sad_entry->field_1C) {
+        int current = sad_entry->rotations[sad_entry->field_20];
+        int turned = anim_dude_turn(object, current);
+        if (turned == (current + ROTATION_COUNT / 2) % ROTATION_COUNT) {
+            sad_entry->rotations[0] = turned;
+            sad_entry->field_20 = 0;
+            sad_entry->field_1C = 1;
+            sad_entry->field_24 = tile_num_in_direction(object->tile, turned, 1);
+            obj_set_rotation(object, turned, &temp);
+            rect_min_bound(&dirty, &temp, &dirty);
+        }
+    }
+
     int rotation = sad_entry->rotations[sad_entry->field_20];
     int y = off_tile[1][rotation];
     int x = off_tile[0][rotation];
@@ -2699,6 +2727,63 @@ static void object_move(int index)
             }
 
             sad_entry->field_20 += 1;
+
+            // Stick walking: replace the rest of the path with the next hex
+            // the stick asks for. Done here, at the hex boundary, so the
+            // walk cycle carries on without a stop.
+            if (object == obj_dude && anim_dude_steer != NULL && !v17) {
+                int anim = sad_entry->anim;
+                int nextRotation = anim_dude_steer(object, &anim);
+                if (nextRotation >= 0 && nextRotation < ROTATION_COUNT) {
+                    sad_entry->rotations[0] = nextRotation;
+                    sad_entry->field_20 = 0;
+                    sad_entry->field_1C = 1;
+                    sad_entry->field_24 = tile_num_in_direction(object->tile, nextRotation, 1);
+
+                    // Switch between walking and running (not while
+                    // sneaking or with a crippled leg, as for clicks).
+                    if (anim == ANIM_RUNNING
+                        && ((object->data.critter.combat.results & DAM_CRIP_LEG_ANY) != 0
+                            || (is_pc_flag(PC_FLAG_SNEAKING) && !perk_level(PERK_SILENT_RUNNING)))) {
+                        anim = ANIM_WALK;
+                    }
+                    if (anim != sad_entry->anim && (anim == ANIM_WALK || anim == ANIM_RUNNING)) {
+                        int fid = art_id(FID_TYPE(object->fid), object->fid & 0xFFF, anim, (object->fid & 0xF000) >> 12, nextRotation + 1);
+                        if (art_exists(fid)) {
+                            // Keep the place in the stride: the same share
+                            // of the new cycle as of the old one.
+                            int oldFrames = 0;
+                            int newFrames = 0;
+                            CacheEntry* artHandle;
+                            Art* oldArt = art_ptr_lock(object->fid, &artHandle);
+                            if (oldArt != NULL) {
+                                oldFrames = art_frame_max_frame(oldArt);
+                                art_ptr_unlock(artHandle);
+                            }
+                            Art* newArt = art_ptr_lock(fid, &artHandle);
+                            if (newArt != NULL) {
+                                newFrames = art_frame_max_frame(newArt);
+                                art_ptr_unlock(artHandle);
+                            }
+                            int frame = 0;
+                            if (oldFrames > 0 && newFrames > 0) {
+                                frame = object->frame * newFrames / oldFrames;
+                                if (frame >= newFrames) {
+                                    frame = newFrames - 1;
+                                }
+                            }
+
+                            sad_entry->anim = anim;
+                            sad_entry->fid = fid;
+                            sad_entry->ticksPerFrame = compute_tpf(object, fid);
+                            obj_change_fid(object, fid, &temp);
+                            rect_min_bound(&dirty, &temp, &dirty);
+                            obj_set_frame(object, frame, &temp);
+                            rect_min_bound(&dirty, &temp, &dirty);
+                        }
+                    }
+                }
+            }
 
             if (sad_entry->field_20 == sad_entry->field_1C || v17) {
                 sad_entry->field_20 = -1000;
