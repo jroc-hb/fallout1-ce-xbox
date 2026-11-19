@@ -634,8 +634,8 @@ void xbox_options_menu()
             save = true;
             done = true;
             break;
-        // BACK sends 'b'.
-        case KEY_LOWERCASE_B:
+        // BACK sends F11 (the menus wheel's key in the game).
+        case KEY_F11:
         case XO_EVENT_CANCEL:
             done = true;
             break;

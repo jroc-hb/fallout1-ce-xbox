@@ -153,6 +153,14 @@ void gmouse_near_target_update(bool enabled);
 bool gmouse_near_target_step(int dirX, int dirY);
 // Does to it what clicking it with the arrow would. False if there is none.
 bool gmouse_near_target_use();
+// The highlighted object if the cursor `mode` (e.g. a skill's) could act on
+// it, else NULL.
+Object* gmouse_near_target_for_mode(int mode);
+// Examines the highlighted object (B in walk mode). False if there is none.
+bool gmouse_near_target_look();
+// While `on` (LT held), outlines every usable object on screen; call every
+// frame, it removes them again once off.
+void gmouse_show_all_update(bool on);
 // Opens the action menu on it (as holding the mouse button on it does);
 // `held` reports whether the button that opened it is still down.
 bool gmouse_near_target_menu(bool (*held)());

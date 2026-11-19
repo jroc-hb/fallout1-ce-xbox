@@ -214,13 +214,42 @@ applies, BACK (`b`) cancels; the mouse works on the knobs, sliders and buttons t
   `[control] swap_sticks` (default 0) remaps the stick axes at the top of the gamepad axis
   handler (`SticksSwapped()`: also always on in walk mode), so everything downstream (deadzones,
   pointer, panning) just sees "pointer stick" and "camera stick".
-- Stick clicks go by the physical stick, whatever the swap: the **left click toggles walk mode**
-  (`GamepadToggleStickWalk`: saves `[control] stick_walk` with `gconfig_save`, prints "Controls:
-  walk with the left stick." / "Controls: pointer." in the message box, plays the haptic tick).
-  The **right click** is the Skilldex (S) in walk mode (the camera follows the player and the
-  pointer to reach the HUD button is hidden) and centers the camera (Home) otherwise; its
-  release sends the same key it pressed. The old left click (Skilldex, or centering when
-  swapped) is gone.
+- **The player-facing control reference is `CONTROLS.md`** (linked from the README). Keep it in
+  sync with any change to the mapping below.
+- **Button map** (gamepad.cc `HandleControllerButtonDown/Up`, 2026-11-17 redesign: triggers and
+  stick clicks are what can be pressed with both thumbs on the sticks, so they carry the actions
+  done while moving; face buttons the ones you stop for):
+  - **A / RT**: left click (in walk mode: use the highlighted object; hold = action menu).
+    **B**: right click; in walk mode with the pointer hidden, Look at the highlighted object
+    (`stick_walk_request_look` -> `gmouse_near_target_look`). **LT** held: precision pointer
+    (the existing brake) and every usable object on screen outlined (`gmouse_show_all_update`,
+    from `ProcessTriggers`; hands the outline over to the walk highlight / d-pad selection if
+    they're on the same object). LT + d-pad still sends 1-8 (skill hotkeys).
+  - **X**: inventory (I); in combat (with the interface enabled) a tap reloads (key R ->
+    `intface_quick_reload`, the active weapon whatever its mode, reload AP charged) and a hold
+    (400 ms, `ProcessHeldButtons`) opens the inventory. **Y**: swap hands (B key).
+    **Black**: weapon mode (N). **White**: tap = end turn (Space, on release), hold = end combat
+    (Enter). **Start**: Esc. **Back**: menus wheel (F11; F12 is the screenshot key).
+  - Stick clicks go by the physical stick, whatever the swap: **left** toggles walk mode
+    (`GamepadToggleStickWalk`: saves `[control] stick_walk` with `gconfig_save`, prints
+    "Controls: walk with the left stick." / "Controls: pointer.", plays the haptic tick); in
+    combat it centers the camera (Home). **Right** is S, which on NXDK always opens the skill
+    wheel (below); its release sends the same key it pressed.
+  - The **menus wheel** (`menus_wheel_select` in skillwheel.cc, titled MENUS, same radial code
+    as the skill wheel): Inventory, Pip-Boy, Character, Map, Skilldex, Options, Load, Save;
+    picking one feeds its hotkey back into `game_handle_input`. Names that don't fit the button
+    in font 103 use font 101. Both wheels are steered with the **physical left stick**
+    (`GamepadGetPhysicalLeftStick`, whatever the swap; user request) or the d-pad, and while one
+    is open `GamepadSetUiCapture` stops both sticks from moving the pointer, panning or walking.
+  - Other screens that read the old keys: XBOX OPTS cancels on F11 (Back) now (it was `b`, which
+    Y sends now); in dialogue `b` (Y) is Barter; character selection still backs out on Esc
+    (Start).
+  - XEMU note: the ViGEm pad's LB/RB arrive as Black/White (SDL buttons 9/10).
+  - Verified in XEMU: menus wheel -> Character, and left-stick steering with walk mode on (no
+    walking behind the wheel, the right stick ignored); LT outlines (doors, NPCs) and clears; B Look on
+    Zark ("You see a thug"); in combat X reloaded an empty pistol, Black cycled SINGLE/RELOAD, Y
+    swapped hands, White ended the turn (and, with no hostiles, combat). Not exercised: White
+    hold, LS centering in combat, X hold.
 
 **Stick walking** (prototype; `game/stickwalk.cc`): walk mode, toggled in-game with the left stick
 click (`[control] stick_walk`, default 0; it used to be SWAP STICKS = WALK / `swap_sticks=2`,
@@ -301,6 +330,25 @@ inventory while the left stick moved the pointer.
   bins outside the Cathedral) has no use action and is skipped. The previous target is only
   touched if it's still in the 8-hex object list; `gmouse_forget_target` and `gmouse_reset` clear
   it too.
+- **Skill wheel** (`game/skillwheel.cc`; on NXDK `game.cc` KEY_S always calls
+  `skill_wheel_select` / `skill_wheel_use`, in any mode and in combat; with the pointer shown the
+  target is the object under it). The eight Skilldex
+  skills on an ellipse around the player, clockwise from the top in Skilldex order, drawn with
+  the Skilldex button art (interface fids 120/119) and names from `skilldex.msg`, each with its
+  level; the selected one gets a gold frame. The center shows what A will do ("A: on Slummer",
+  "on yourself", "pick a target", "toggle"). It runs its own modal loop: the pointer stick
+  (the physical left stick past 0.5) or the d-pad picks; A uses;
+  B (`GamepadBackHeld`, read from the pad because the mouse layer ignores buttons while the
+  pointer is hidden), START or another right click closes. `GamepadSetUiCapture` keeps A from
+  clicking and the stick from moving the pointer meanwhile, and `stick_walk_pause` stops
+  walking. Using a skill: on the highlighted object if that skill's cursor mode accepts it
+  (`gmouse_near_target_for_mode`), First Aid / Doctor on the player otherwise, Sneak toggles,
+  and with no target it falls back to the normal skill cursor (pointer shown in front of the
+  player). GNW draws transparent windows only when back-buffering, which isn't on, so the
+  window is filled with a dimmed copy of the map under it (`intensityColorTable[..][80]`).
+  Verified in XEMU: First Aid from the wheel on Slummer ("looks healthy already"), d-pad and
+  stick selection, B and right click close, Lockpick with nothing near gave the skill cursor.
+  Sneak wasn't exercised.
 - Verified in XEMU: guard outlined, A opened dialogue without the outline in its view, outline
   gone after; Cathedral door outlined, A went through it; pointer hidden while walking and back
   in front of the player on a right-stick nudge; A with the pointer visible is a normal click.

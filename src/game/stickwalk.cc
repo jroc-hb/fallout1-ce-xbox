@@ -76,6 +76,7 @@ static bool sw_installed = false;
 // A or RT, tapped or held, waiting for the game loop (stick_walk_run_pending).
 static bool sw_use_pending = false;
 static bool sw_menu_pending = false;
+static bool sw_look_pending = false;
 // The player is carrying out what A started (walking over, picking up):
 // no highlight until that's done.
 static bool sw_acting = false;
@@ -410,9 +411,22 @@ StickWalkResult stick_walk_update(float x, float y, float dt)
     return STICK_WALK_HANDLED;
 }
 
+void stick_walk_pause(bool paused)
+{
+    sw_in_menu = paused;
+    if (paused) {
+        sw_walking = false;
+    }
+}
+
 void stick_walk_request_use()
 {
     sw_use_pending = true;
+}
+
+void stick_walk_request_look()
+{
+    sw_look_pending = true;
 }
 
 void stick_walk_request_menu()
@@ -424,8 +438,14 @@ void stick_walk_run_pending()
 {
     const bool use = sw_use_pending;
     const bool menu = sw_menu_pending;
+    const bool look = sw_look_pending;
     sw_use_pending = false;
     sw_menu_pending = false;
+    sw_look_pending = false;
+
+    if (look && gmouse_walk_pointer_hidden()) {
+        gmouse_near_target_look();
+    }
 
     if ((!use && !menu) || sw_acting || !gmouse_walk_pointer_hidden()) {
         return;

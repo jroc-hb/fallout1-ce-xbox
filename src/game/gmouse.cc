@@ -317,6 +317,7 @@ static Object* outlined_object = NULL;
 // Stick walking hid the pointer (gmouse_walk_hide_pointer).
 static bool gmouse_walk_hidden = false;
 static void gmouse_near_clear(bool objectValid);
+static void gmouse_show_all_reset();
 #endif
 
 // 0x5053F4
@@ -367,6 +368,7 @@ int gmouse_reset()
     // The objects are about to go away; don't touch the selection.
     gmouse_clear_target(false);
     gmouse_near_clear(false);
+    gmouse_show_all_reset();
 #endif
 
     // NOTE: Uninline.
@@ -2819,6 +2821,7 @@ static int gmouse_target_y = 0;
 
 static bool gmouse_target_on_screen(Object* obj, int* centerX, int* centerY);
 static void gmouse_near_forget(Object* obj);
+static void gmouse_show_all_forget(Object* obj);
 
 // Ends the selection. Only touches the object when `objectValid` (it may have
 // been freed) and only removes the outline we added.
@@ -2884,6 +2887,7 @@ void gmouse_forget_target(Object* obj)
         gmouse_clear_target(true);
     }
     gmouse_near_forget(obj);
+    gmouse_show_all_forget(obj);
 }
 
 // Whether the selection still exists: look for its pointer among the
@@ -3447,6 +3451,147 @@ bool gmouse_near_target_step(int dirX, int dirY)
     // The d-pad belongs to the targets while the pointer is hidden, even
     // when there's nothing that way.
     return true;
+}
+
+Object* gmouse_near_target_for_mode(int mode)
+{
+    if (!gmouse_initialized) {
+        return NULL;
+    }
+
+    // Pointer shown: what's under it.
+    if (!gmouse_walk_hidden) {
+        Object* obj = object_under_mouse(-1, true, map_elevation);
+        if (obj != NULL && obj != obj_dude && gmouse_pointer_assist_wants(obj, mode)) {
+            return obj;
+        }
+        return NULL;
+    }
+
+    if (gmouse_near == NULL || !gmouse_pointer_assist_wants(gmouse_near, mode)) {
+        return NULL;
+    }
+    return gmouse_near;
+}
+
+bool gmouse_near_target_look()
+{
+    if (!gmouse_walk_hidden || gmouse_near == NULL) {
+        return false;
+    }
+
+    if (obj_examine(obj_dude, gmouse_near) == -1) {
+        obj_look_at(obj_dude, gmouse_near);
+    }
+    return true;
+}
+
+// Everything usable on screen gets the item outline while LT is held
+// (gmouse_show_all_update). Only objects found in the latest scan are ever
+// touched, so a freed one is never dereferenced.
+#define GMOUSE_SHOW_ALL_MAX 128
+#define GMOUSE_SHOW_ALL_RADIUS 26
+static Object* gmouse_show_all[GMOUSE_SHOW_ALL_MAX];
+static int gmouse_show_all_count = 0;
+
+static void gmouse_show_all_reset()
+{
+    gmouse_show_all_count = 0;
+}
+
+static void gmouse_show_all_forget(Object* obj)
+{
+    for (int index = 0; index < gmouse_show_all_count; index++) {
+        if (gmouse_show_all[index] == obj) {
+            gmouse_show_all[index] = gmouse_show_all[--gmouse_show_all_count];
+            return;
+        }
+    }
+}
+
+void gmouse_show_all_update(bool on)
+{
+    if (!gmouse_initialized || obj_dude == NULL) {
+        return;
+    }
+
+    if (on) {
+        int centerX = (scr_size.lrx - scr_size.ulx + 1) / 2;
+        int centerY = (scr_size.lry - scr_size.uly - 99) / 2;
+        on = gmouse_enabled
+            && gmouse_mapper_mode == 0
+            && gmouse_scrolling_is_enabled()
+            && win_get_top_win(centerX, centerY) == display_win;
+    }
+
+    if (!on && gmouse_show_all_count == 0) {
+        return;
+    }
+
+    static Object* objects[512];
+    int count = obj_list_near_tile(tile_center_tile, GMOUSE_SHOW_ALL_RADIUS, map_elevation, objects, 512);
+
+    static bool wanted[512];
+    for (int index = 0; index < count; index++) {
+        Object* obj = objects[index];
+        int x;
+        int y;
+        wanted[index] = on
+            && obj != obj_dude
+            && gmouse_pointer_assist_wants(obj, GAME_MOUSE_MODE_ARROW)
+            && gmouse_target_on_screen(obj, &x, &y);
+    }
+
+    // Drop the ones no longer wanted (or gone).
+    for (int listIndex = gmouse_show_all_count - 1; listIndex >= 0; listIndex--) {
+        Object* obj = gmouse_show_all[listIndex];
+        int found = -1;
+        for (int index = 0; index < count; index++) {
+            if (objects[index] == obj) {
+                found = index;
+                break;
+            }
+        }
+
+        if (found != -1 && wanted[found]) {
+            continue;
+        }
+
+        if (found != -1 && (obj->outline & OUTLINE_TYPE_MASK) == OUTLINE_TYPE_ITEM) {
+            // The walk highlight or d-pad selection may want it outlined:
+            // hand the outline over instead of removing it.
+            if (obj == gmouse_near) {
+                gmouse_near_outlined = true;
+            } else if (obj == gmouse_target) {
+                gmouse_target_outlined = true;
+            } else {
+                Rect rect;
+                if (obj_remove_outline(obj, &rect) == 0) {
+                    tile_refresh_rect(&rect, obj->elevation);
+                }
+            }
+        }
+        gmouse_show_all[listIndex] = gmouse_show_all[--gmouse_show_all_count];
+    }
+
+    if (!on) {
+        return;
+    }
+
+    // Outline the new ones (not anything already outlined: combat, the
+    // walk highlight, the d-pad selection).
+    for (int index = 0; index < count && gmouse_show_all_count < GMOUSE_SHOW_ALL_MAX; index++) {
+        Object* obj = objects[index];
+        if (!wanted[index] || (obj->outline & OUTLINE_TYPE_MASK) != 0) {
+            continue;
+        }
+
+        Rect rect;
+        if (obj_outline_object(obj, OUTLINE_TYPE_ITEM, &rect) == 0) {
+            gmouse_show_all[gmouse_show_all_count++] = obj;
+            tile_refresh_rect(&rect, obj->elevation);
+        }
+    }
 }
 
 bool gmouse_near_target_use()

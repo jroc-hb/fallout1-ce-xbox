@@ -2165,6 +2165,49 @@ static void intface_draw_ammo_lights(int x, int ratio)
     }
 }
 
+// CE: Reloads the weapon in the active hand whatever its mode (the gamepad's
+// reload button), taking the reload's AP in combat. -1 if nothing happened.
+int intface_quick_reload()
+{
+    if (interfaceWindow == -1) {
+        return -1;
+    }
+
+    InterfaceItemState* ptr = &(itemButtonItems[itemCurrentItem]);
+    if (ptr->isWeapon == 0 || ptr->item == NULL || item_w_max_ammo(ptr->item) <= 0) {
+        return -1;
+    }
+
+    int actionPointsRequired = 0;
+    if (isInCombat()) {
+        int hitMode = itemCurrentItem == HAND_LEFT
+            ? HIT_MODE_LEFT_WEAPON_RELOAD
+            : HIT_MODE_RIGHT_WEAPON_RELOAD;
+        actionPointsRequired = item_mp_cost(obj_dude, hitMode, false);
+        if (actionPointsRequired > obj_dude->data.critter.combat.ap) {
+            return -1;
+        }
+    }
+
+    bool reloaded = false;
+    while (item_w_try_reload(obj_dude, ptr->item) != -1) {
+        reloaded = true;
+    }
+    if (!reloaded) {
+        return -1;
+    }
+
+    if (isInCombat()) {
+        obj_dude->data.critter.combat.ap -= actionPointsRequired;
+        intface_update_move_points(obj_dude->data.critter.combat.ap, combat_free_move);
+    }
+    intface_update_items(false);
+
+    const char* sfx = gsnd_build_weapon_sfx_name(WEAPON_SOUND_EFFECT_READY, ptr->item, HIT_MODE_RIGHT_WEAPON_PRIMARY, NULL);
+    gsound_play_sfx_file(sfx);
+    return 0;
+}
+
 // 0x4560E4
 static int intface_item_reload()
 {

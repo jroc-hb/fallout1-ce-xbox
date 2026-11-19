@@ -36,9 +36,20 @@ void GamepadPointerHapticTick(int strength);
 void GamepadRumbleUpdate();
 // Whether A or RT (the gamepad's left click) is down right now.
 bool GamepadClickHeld();
+// Whether B (the gamepad's right click) is down right now. Read directly:
+// the mouse layer ignores buttons while the pointer is hidden.
+bool GamepadBackHeld();
 // Switches walk mode (left stick walks the player) on or off, saves it and
 // says so in the message box. Bound to the left stick click.
 void GamepadToggleStickWalk();
+// Walk mode is on.
+bool GamepadStickWalkEnabled();
+// The physical left stick's deflection past its deadzone (x right, y up),
+// whatever the stick swap.
+void GamepadGetPhysicalLeftStick(float* x, float* y);
+// While set, A/RT never click and the pointer stick doesn't move the
+// pointer: a pad-driven menu (the skill wheel) reads them itself.
+void GamepadSetUiCapture(bool capture);
 
 } // namespace fallout
 

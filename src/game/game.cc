@@ -41,6 +41,7 @@
 #include "game/skill.h"
 #include "game/skilldex.h"
 #include "game/stat.h"
+#include "game/skillwheel.h"
 #include "game/stickwalk.h"
 #include "game/tile.h"
 #include "game/trait.h"
@@ -595,6 +596,24 @@ int game_handle_input(int eventCode, bool isInCombatMode)
     case KEY_LOWERCASE_M:
         gmouse_3d_toggle_mode();
         break;
+#ifdef NXDK
+    case KEY_UPPERCASE_R:
+    case KEY_LOWERCASE_R:
+        // The gamepad's reload (X in combat).
+        if (intface_is_enabled()) {
+            intface_quick_reload();
+        }
+        break;
+    case KEY_F11:
+        // The gamepad's menus wheel (BACK).
+        if (intface_is_enabled()) {
+            int screenKey = menus_wheel_select(KEY_F11);
+            if (screenKey != -1) {
+                game_handle_input(screenKey, isInCombatMode);
+            }
+        }
+        break;
+#endif
     case KEY_UPPERCASE_B:
     case KEY_LOWERCASE_B:
         // change active hand
@@ -656,6 +675,20 @@ int game_handle_input(int eventCode, bool isInCombatMode)
             gsound_play_sfx_file("ib1p1xx1");
 
             int mode = -1;
+
+#ifdef NXDK
+            // The right stick click: the skill wheel, which uses the skill on
+            // the highlighted object (walk mode) or the one under the pointer.
+            if (true) {
+                int wheelRc = skill_wheel_select();
+                if (wheelRc == SKILLDEX_RC_ERROR) {
+                    debug_printf("\n ** Error calling skill_wheel_select()! ** \n");
+                } else {
+                    skill_wheel_use(wheelRc);
+                }
+                break;
+            }
+#endif
 
             // NOTE: There is an `inc` for this value to build jump table which
             // is not needed.

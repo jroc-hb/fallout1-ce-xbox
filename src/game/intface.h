@@ -50,6 +50,7 @@ int intface_get_attack(int* hitMode, bool* aiming);
 int intface_update_items(bool animated);
 int intface_toggle_items(bool animated);
 int intface_toggle_item_state();
+int intface_quick_reload();
 void intface_use_item();
 int intface_is_item_right_hand();
 int intface_get_current_item(Object** itemPtr);

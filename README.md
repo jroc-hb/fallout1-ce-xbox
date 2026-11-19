@@ -24,28 +24,17 @@ An early port of Fallout 1 for the Original Xbox made using the NXDK. Very much 
 
 # Controls
 
-- Very WIP and will be remappable in the future
+The game is played entirely with the controller. The full control scheme is in
+[CONTROLS.md](CONTROLS.md). In short:
 
-| Xbox Controller Input      | Fallout Function          | Keyboard Equivalent |
-| -------------------------- | ------------------------- | ------------------- |
-| **Left Analog Stick**      | Mouse Movement            | N/A                 |
-| **Right Analog Stick**     | Camera Movement           | N/A                 |
-| **A**                      | Left Mouse Click          | N/A                 |
-| **B**                      | Right Mouse Click         | N/A                 |
-| **X**                      | Inventory                 | `I`                 |
-| **Y**                      | Pip-Boy                   | `P`                 |
-| **Back**                   | Character Sheet           | `C`                 |
-| **Start**                  | Options Menu              | `Esc`               |
-| **D-Pad Up**               | Menu Up / Navigate Up     | `↑`                 |
-| **D-Pad Down**             | Menu Down / Navigate Down | `↓`                 |
-| **D-Pad Left**             | Open Skilldex             | `S`                 |
-| **D-Pad Right**            | Quick Save Menu           | `F6`                |
-| **White**                  | End Turn                  | `SPACE`             |
-| **Black**                  | Exit Combat               | `ENTER`             |
-| **Left Stick Click**       | Center Camera on Player   | `Home`              |
-| **Right Stick Click**      | Enter Combat Mode         | `A`                 |
-| **Left Trigger**           | Toggle Active Item Mode   | `N`                 |
-| **Right Trigger**          | Toggle Active Item        | `B`                 |
+- **Click the left stick** to switch between **walk mode** (the left stick walks your
+  character, A uses whatever is next to you) and **pointer mode** (Fallout's normal
+  point-and-click).
+- **A / RT** use or click, **B** looks or right-clicks, **X** inventory (reload in combat),
+  **Y** swap hands, **Black** weapon mode, **White** end turn.
+- **Right stick click** opens the skill wheel, **Back** opens the menus wheel (Pip-Boy,
+  character, map, save, load...), **Start** opens the options menu.
+- Hold **LT** to outline everything usable on screen.
 
 # Installation Instructions
 - The FalloutCE folder contains `default.xbe`, `f1_res.ini` and `fallout.cfg`

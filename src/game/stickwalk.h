@@ -26,7 +26,13 @@ StickWalkResult stick_walk_update(float x, float y, float dt);
 // (gmouse.cc). Done by stick_walk_run_pending, from the game loop.
 void stick_walk_request_use();
 void stick_walk_request_menu();
+// B while the pointer is hidden: examine the highlighted object.
+void stick_walk_request_look();
 void stick_walk_run_pending();
+
+// While paused (a pad-driven menu such as the skill wheel is open) the stick
+// neither walks nor moves anything.
+void stick_walk_pause(bool paused);
 
 } // namespace fallout
 
