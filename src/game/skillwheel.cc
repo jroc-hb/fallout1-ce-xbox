@@ -14,6 +14,7 @@
 #include "game/map.h"
 #include "game/message.h"
 #include "game/object.h"
+#include "game/padglyph.h"
 #include "game/skill.h"
 #include "game/skilldex.h"
 #include "game/stickwalk.h"
@@ -151,6 +152,18 @@ static void wheel_text(Wheel* wheel, const char* text, int centerX, int y, int c
     trans_buf_to_buf(scratch, width, height, width, wheel->buf + wheel->width * (y - 1) + x, wheel->width);
 }
 
+// A button glyph followed by text, the pair centred on centerX; `y` is the
+// glyph's top (the text is centred on it).
+static void wheel_glyph_text(Wheel* wheel, PadGlyph glyph, const char* text, int centerX, int y, int color)
+{
+    int glyphSize = pad_glyph_size();
+    int gap = 3;
+    int textWidth = text_width(text) + 2;
+    int left = centerX - (glyphSize + gap + textWidth) / 2;
+    pad_glyph_draw(wheel->buf, wheel->width, wheel->width, wheel->height, left, y, glyph);
+    wheel_text(wheel, text, left + glyphSize + gap + textWidth / 2, y + (glyphSize - text_height()) / 2, color);
+}
+
 static void wheel_draw(Wheel* wheel)
 {
     memcpy(wheel->buf, wheel->background, wheel->width * wheel->height);
@@ -210,8 +223,13 @@ static void wheel_draw(Wheel* wheel)
     text_font(101);
     char line[128];
     wheel->hint(wheel, line, sizeof(line));
-    wheel_text(wheel, line, centerX, centerY, colorTable[32747]);
-    wheel_text(wheel, "B: close", centerX, centerY + 12, colorTable[21140]);
+    // "A: ..." hints get the A button's glyph instead of the "A:".
+    if (strncmp(line, "A: ", 3) == 0) {
+        wheel_glyph_text(wheel, PAD_GLYPH_A, line + 3, centerX, centerY - 1, colorTable[32747]);
+    } else {
+        wheel_text(wheel, line, centerX, centerY, colorTable[32747]);
+    }
+    wheel_glyph_text(wheel, PAD_GLYPH_B, "Close", centerX, centerY + 14, colorTable[21140]);
 
     win_draw(wheel->win);
 }
@@ -451,16 +469,16 @@ static void skill_wheel_hint(Wheel* wheel, char* line, int size)
     if (wheel->selected == -1) {
         snprintf(line, size, "Pick a skill");
     } else if (wheel_modes[wheel->selected] == -1) {
-        snprintf(line, size, "A: toggle");
+        snprintf(line, size, "A: Toggle");
     } else {
         Object* target = wheel_target(wheel->selected);
         if (target == obj_dude) {
-            snprintf(line, size, "A: on yourself");
+            snprintf(line, size, "A: On yourself");
         } else if (target != NULL) {
             const char* name = object_name(target);
-            snprintf(line, size, "A: on %s", name != NULL ? name : "it");
+            snprintf(line, size, "A: On %s", name != NULL ? name : "it");
         } else {
-            snprintf(line, size, "A: pick a target");
+            snprintf(line, size, "A: Pick a target");
         }
     }
 }
@@ -525,7 +543,7 @@ static const int menus_keys[WHEEL_SLOTS] = {
 
 static void menus_wheel_hint(Wheel* wheel, char* line, int size)
 {
-    snprintf(line, size, "%s", wheel->selected == -1 ? "Pick a menu" : "A: open");
+    snprintf(line, size, "%s", wheel->selected == -1 ? "Pick a menu" : "A: Open");
 }
 
 int menus_wheel_select(int openKey)

@@ -468,6 +468,10 @@ void HandleControllerButtonUp(const SDL_Event& event)
 }
 
 
+// The button map. If you change what a button does, also update CONTROLS.md
+// and the on-screen glyphs that show it: the LT overlay on the HUD
+// (intface.cc intface_glyph_spots), the walk-mode label's A (gmouse.cc) and
+// the wheels' A/B hints (skillwheel.cc). See AGENTS.md.
 void HandleControllerButtonDown(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
@@ -954,8 +958,10 @@ void ProcessTriggers()
 {
     ProcessHeldButtons();
 
-    // LT held: outline everything usable on screen.
+    // LT held: outline everything usable on screen, and show which pad
+    // button does what on the HUD.
     gmouse_show_all_update(gLeftTriggerValue >= 0.5f);
+    intface_show_pad_glyphs(gLeftTriggerValue);
 
     // Minimum analog value to consider the right trigger "engaged".
     const float kDeadzone = 0.05f;

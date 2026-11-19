@@ -20,6 +20,17 @@ choice is remembered.
 Combat always uses the pointer (see [Combat](#combat)). With walk mode on, the pointer is on
 the right stick and the left stick pans the camera.
 
+## Seeing which button does what
+
+- **Hold LT** to show a controller button icon on every interface bar button that has a
+  shortcut (they fade in as you squeeze the trigger): Y, X, START (options), Black (item mode), RS (Skilldex: the right stick click
+  opens the skill wheel), BACK (map, character and Pip-Boy are in the menus wheel), and White
+  by END TURN / END COMBAT in combat. They go away when you let go. Holding LT also outlines
+  everything usable on the map.
+- In **walk mode**, the label over the highlighted object starts with **A**
+  (e.g. **(A)** Talk: Slummer).
+- The **wheels** show **(A)** next to what choosing does and **(B)** Close.
+
 ## Button map
 
 | Input | Walk mode | Pointer mode | Combat |

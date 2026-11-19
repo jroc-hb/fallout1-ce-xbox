@@ -1,9 +1,12 @@
 #include "game/textobj.h"
 
+#include <algorithm>
+
 #include <string.h>
 
 #include "game/gconfig.h"
 #include "game/object.h"
+#include "game/padglyph.h"
 #include "game/tile.h"
 #include "game/wordwrap.h"
 #include "plib/gnw/debug.h"
@@ -500,7 +503,7 @@ static void text_object_get_offset(TextObject* textObject)
 // has only one text: so as not to replace something it's saying, there's no
 // label while it shows any other text. `rect` gets the area to refresh
 // (the label's old and new positions).
-int text_object_create_label(Object* object, char* string, int font, int color, int outlineColor, int lift, Rect* rect)
+int text_object_create_label(Object* object, char* string, int font, int color, int outlineColor, int lift, int glyph, Rect* rect)
 {
     for (int index = 0; index < text_object_index; index++) {
         TextObject* textObject = text_object_list[index];
@@ -517,6 +520,39 @@ int text_object_create_label(Object* object, char* string, int font, int color, 
     // text_object_create appends it.
     TextObject* textObject = text_object_list[text_object_index - 1];
     textObject->flags |= TEXT_OBJECT_LABEL;
+
+    // A gamepad button glyph in front of the text (the button that does it).
+    if (glyph >= 0) {
+        int glyphSize = pad_glyph_size();
+        int gap = 3;
+        int width = glyphSize + gap + textObject->width;
+        int height = std::max(glyphSize, textObject->height);
+        unsigned char* data = (unsigned char*)mem_malloc(width * height);
+        if (data != NULL) {
+            memset(data, 0, width * height);
+            buf_to_buf(textObject->data,
+                textObject->width,
+                textObject->height,
+                textObject->width,
+                data + width * ((height - textObject->height) / 2) + glyphSize + gap,
+                width);
+            pad_glyph_draw(data, width, width, height, 0, (height - glyphSize) / 2, (PadGlyph)glyph);
+            mem_free(textObject->data);
+            textObject->data = data;
+
+            // Keep it centred over the object.
+            int grow = width - textObject->width;
+            textObject->x -= grow / 2;
+            textObject->sx -= grow / 2;
+            textObject->width = width;
+            textObject->height = height;
+            if (rect != NULL) {
+                rect->ulx = textObject->x;
+                rect->lrx = textObject->x + width - 1;
+                rect->lry = rect->uly + height - 1;
+            }
+        }
+    }
 
     int tileScreenX;
     int tileScreenY;

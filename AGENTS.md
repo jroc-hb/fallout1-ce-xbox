@@ -214,8 +214,16 @@ applies, BACK (`b`) cancels; the mouse works on the knobs, sliders and buttons t
   `[control] swap_sticks` (default 0) remaps the stick axes at the top of the gamepad axis
   handler (`SticksSwapped()`: also always on in walk mode), so everything downstream (deadzones,
   pointer, panning) just sees "pointer stick" and "camera stick".
-- **The player-facing control reference is `CONTROLS.md`** (linked from the README). Keep it in
-  sync with any change to the mapping below.
+- **When you change the controls, update everything that shows them.** Any change to the
+  mapping below (a button moved, added or removed, a hold/tap changed, a wheel entry moved)
+  must also update, where affected:
+  - `CONTROLS.md`, the player-facing control reference (linked from the README);
+  - the LT glyph overlay on the HUD (`intface_glyph_spots` in intface.cc: which glyph sits on
+    which bar button, and whether a button gets one at all);
+  - the glyphs in our own UI: the walk-mode label (`gmouse_near_label` passes `PAD_GLYPH_A`),
+    the wheels' "A ..." / "B Close" hints (skillwheel.cc `wheel_draw`);
+  - `padglyph.cc` if a button needs a glyph that doesn't exist yet (add it to `PadGlyph` and its
+    style table, plus any letters the 5x7 font lacks).
 - **Button map** (gamepad.cc `HandleControllerButtonDown/Up`, 2026-11-17 redesign: triggers and
   stick clicks are what can be pressed with both thumbs on the sticks, so they carry the actions
   done while moving; face buttons the ones you stop for):
@@ -244,6 +252,29 @@ applies, BACK (`b`) cancels; the mouse works on the knobs, sliders and buttons t
   - Other screens that read the old keys: XBOX OPTS cancels on F11 (Back) now (it was `b`, which
     Y sends now); in dialogue `b` (Y) is Barter; character selection still backs out on Esc
     (Start).
+  - **Button glyphs** (`game/padglyph.cc`, `pad_glyph_draw`): Duke-style discs drawn from
+    scratch into 8-bit buffers (no art needed): green A, red B, blue X, yellow Y, black/white
+    discs for Black/White, grey "RS"/"LS" and dark "START"/"BACK" pills. Colours go through
+    `colorTable` (never index 0, which is transparent in sprites); letters use a built-in 5x7
+    bitmap font because font 101's R reads as an A at that size. Used where the UI is ours: the
+    walk label (`text_object_create_label`'s `glyph` widens the text object and puts it in
+    front) and the wheels' "A ..." / "B Close" hints.
+  - **The HUD is not drawn over permanently.** Glyphs stuck on Fallout's frame looked janky, and
+    tinting the buttons the pad colours (yellow swap-hands dome, blue INV, white TURN/CMBT)
+    looked bad too; both were tried and removed (user feedback). Instead, **hold LT: glyph
+    overlay** (`intface_show_pad_glyphs`, called every frame from `ProcessTriggers`): one small
+    `WINDOW_MOVE_ON_TOP` window per spot holding a copy of the bar under it plus the glyph (GNW
+    has no transparent windows here), so button redraws can't erase it and deleting the windows
+    restores the bar. Each glyph is centred on its button (`intface_glyph_spots`, centres in bar
+    coordinates): Y swap hands, X INV, START options, Black item box, RS Skilldex, BACK on the
+    MAP/CHA/PIP column (they're in the menus wheel), White on END TURN / END CMBT (only while the
+    combat panel is open). Only shown while the bar is the top window (checked at the AP lights,
+    which no glyph covers). Verified in XEMU in and out of combat, bar restored on release.
+    The glyphs **fade with the trigger**: strength = (LT - 0.1) / 0.75, eased toward that at
+    most a full fade per 150 ms (so XEMU's on/off triggers still fade), drawn in 8 steps by
+    blending each glyph pixel with the saved bar pixel in RGB (`cmap`) and mapping back through
+    `colorTable`. Verified in XEMU (frame capture: red -> orange -> yellow in and back out); the
+    analog part needs real hardware.
   - XEMU note: the ViGEm pad's LB/RB arrive as Black/White (SDL buttons 9/10).
   - Verified in XEMU: menus wheel -> Character, and left-stick steering with walk mode on (no
     walking behind the wheel, the right stick ignored); LT outlines (doors, NPCs) and clears; B Look on

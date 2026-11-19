@@ -18,6 +18,7 @@
 #include "game/gmouse.h"
 #include "game/gsound.h"
 #include "game/item.h"
+#include "game/padglyph.h"
 #include "game/object.h"
 #include "game/protinst.h"
 #include "game/proto.h"
@@ -99,6 +100,10 @@ typedef struct InterfaceItemState {
 
 static int intface_init_items();
 static int intface_redraw_items();
+#ifdef NXDK
+static void intface_glyphs_hide();
+static bool intface_glyphs_shown = false;
+#endif
 static int intface_redraw_items_callback(Object* a1, Object* a2);
 static int intface_change_fid_callback(Object* a1, Object* a2);
 static void intface_change_fid_animate(int previousWeaponAnimationCode, int weaponAnimationCode);
@@ -438,6 +443,7 @@ int intface_init()
         return intface_fatal_error(-1);
     }
 
+
     inventoryButton = win_register_button(interfaceWindow, 211, 41, 32, 21, -1, -1, -1, KEY_LOWERCASE_I, inventoryButtonUp, inventoryButtonDown, NULL, 0);
     if (inventoryButton == -1) {
         // NOTE: Uninline.
@@ -621,6 +627,7 @@ int intface_init()
         return intface_fatal_error(-1);
     }
 
+
     fid = art_id(OBJ_TYPE_INTERFACE, 6, 0, 0, 0);
     toggleButtonMask = art_ptr_lock_data(fid, 0, 0, &toggleButtonMaskKey);
     if (toggleButtonMask == NULL) {
@@ -706,6 +713,12 @@ void intface_reset()
 // 0x453DB0
 void intface_exit()
 {
+#ifdef NXDK
+    if (intface_glyphs_shown) {
+        intface_glyphs_hide();
+    }
+#endif
+
     if (interfaceWindow != -1) {
         display_exit();
 
@@ -2207,6 +2220,202 @@ int intface_quick_reload()
     gsound_play_sfx_file(sfx);
     return 0;
 }
+
+#ifdef NXDK
+// CE: While LT is held, a gamepad glyph over each HUD button that has a pad
+// shortcut. Each is a small window on top of the bar holding a copy of the
+// bar under it plus the glyph, so nothing the buttons redraw can erase it,
+// and deleting the windows puts the bar back as it was.
+typedef struct IntfaceGlyphSpot {
+    int x; // the glyph's centre, in the bar
+    int y;
+    PadGlyph glyph;
+    bool combatOnly; // the END TURN / END CMBT buttons
+} IntfaceGlyphSpot;
+
+// Each glyph sits on the middle of its button (it's only up while LT is
+// held, so covering the button doesn't matter).
+static const IntfaceGlyphSpot intface_glyph_spots[] = {
+    { 229, 16, PAD_GLYPH_Y, false }, // swap hands (218,6 22x21)
+    { 227, 51, PAD_GLYPH_X, false }, // INV (211,41 32x21)
+    { 227, 79, PAD_GLYPH_START, false }, // options (210,62 34x34)
+    { 361, 59, PAD_GLYPH_BLACK, false }, // item mode (267,26 188x67)
+    { 534, 17, PAD_GLYPH_RS, false }, // Skilldex: the skill wheel (523,7 22x21)
+    { 546, 68, PAD_GLYPH_BACK, false }, // MAP / CHA / PIP: the menus wheel (526,40 41x57)
+    { 609, 54, PAD_GLYPH_WHITE, true }, // END TURN, tap (590,43 38x22)
+    { 609, 76, PAD_GLYPH_WHITE, true }, // END CMBT, hold (590,65 38x22)
+};
+
+#define INTFACE_GLYPH_SPOTS (sizeof(intface_glyph_spots) / sizeof(intface_glyph_spots[0]))
+
+static int intface_glyph_windows[INTFACE_GLYPH_SPOTS];
+// Per window: the bar under it, and the glyph alone (0 = no glyph pixel).
+static unsigned char* intface_glyph_under[INTFACE_GLYPH_SPOTS];
+static unsigned char* intface_glyph_art[INTFACE_GLYPH_SPOTS];
+static int intface_glyph_w[INTFACE_GLYPH_SPOTS];
+
+// Fade: how much of the glyphs shows (0..1), eased toward the trigger, and
+// the step last drawn.
+#define INTFACE_GLYPH_FADE_STEPS 8
+// Full fade in or out takes this long (also smooths XEMU's digital triggers).
+#define INTFACE_GLYPH_FADE_MS 150.0f
+static float intface_glyph_alpha = 0.0f;
+static int intface_glyph_step = 0;
+static unsigned int intface_glyph_last_time = 0;
+
+static void intface_glyphs_hide()
+{
+    for (unsigned int index = 0; index < INTFACE_GLYPH_SPOTS; index++) {
+        if (intface_glyph_windows[index] != -1) {
+            win_delete(intface_glyph_windows[index]);
+            intface_glyph_windows[index] = -1;
+        }
+        mem_free(intface_glyph_under[index]);
+        intface_glyph_under[index] = NULL;
+        mem_free(intface_glyph_art[index]);
+        intface_glyph_art[index] = NULL;
+    }
+    intface_glyphs_shown = false;
+    intface_glyph_alpha = 0.0f;
+    intface_glyph_step = 0;
+}
+
+// Draws every glyph at `step` / INTFACE_GLYPH_FADE_STEPS strength: each
+// glyph pixel blended with the bar pixel under it in RGB, then mapped back
+// to the nearest palette colour (8-bit, no real transparency).
+static void intface_glyphs_draw(int step)
+{
+    int height = pad_glyph_size();
+    int amount = step * 256 / INTFACE_GLYPH_FADE_STEPS;
+    for (unsigned int index = 0; index < INTFACE_GLYPH_SPOTS; index++) {
+        int win = intface_glyph_windows[index];
+        if (win == -1) {
+            continue;
+        }
+
+        unsigned char* buf = win_get_buf(win);
+        int size = intface_glyph_w[index] * height;
+        for (int pixel = 0; pixel < size; pixel++) {
+            int under = intface_glyph_under[index][pixel];
+            int glyph = intface_glyph_art[index][pixel];
+            if (glyph == 0 || amount <= 0) {
+                buf[pixel] = (unsigned char)under;
+            } else if (amount >= 256) {
+                buf[pixel] = (unsigned char)glyph;
+            } else {
+                int r = (cmap[under * 3] * (256 - amount) + cmap[glyph * 3] * amount) >> 8;
+                int g = (cmap[under * 3 + 1] * (256 - amount) + cmap[glyph * 3 + 1] * amount) >> 8;
+                int b = (cmap[under * 3 + 2] * (256 - amount) + cmap[glyph * 3 + 2] * amount) >> 8;
+                // The palette is 6 bits per channel, colorTable 5.
+                buf[pixel] = colorTable[((r >> 1) << 10) | ((g >> 1) << 5) | (b >> 1)];
+            }
+        }
+        win_draw(win);
+    }
+}
+
+// Opens the glyph windows (nothing drawn yet).
+static void intface_glyphs_open()
+{
+    Rect barRect;
+    win_get_rect(interfaceWindow, &barRect);
+    int height = pad_glyph_size();
+    for (unsigned int index = 0; index < INTFACE_GLYPH_SPOTS; index++) {
+        const IntfaceGlyphSpot* spot = &(intface_glyph_spots[index]);
+        intface_glyph_windows[index] = -1;
+        intface_glyph_under[index] = NULL;
+        intface_glyph_art[index] = NULL;
+        if (spot->combatOnly && !endWindowOpen) {
+            continue;
+        }
+
+        int width = pad_glyph_width(spot->glyph);
+        int x = spot->x - width / 2;
+        int y = spot->y - height / 2;
+        if (x < 0 || y < 0 || x + width > INTERFACE_BAR_WIDTH || y + height > INTERFACE_BAR_HEIGHT) {
+            continue;
+        }
+
+        unsigned char* under = (unsigned char*)mem_malloc(width * height);
+        unsigned char* art = (unsigned char*)mem_malloc(width * height);
+        int win = under != NULL && art != NULL
+            ? win_add(barRect.ulx + x, barRect.uly + y, width, height, 0, WINDOW_MOVE_ON_TOP)
+            : -1;
+        if (win == -1) {
+            mem_free(under);
+            mem_free(art);
+            continue;
+        }
+
+        buf_to_buf(interfaceBuffer + INTERFACE_BAR_WIDTH * y + x, width, height, INTERFACE_BAR_WIDTH, under, width);
+        memset(art, 0, width * height);
+        pad_glyph_draw(art, width, width, height, 0, 0, spot->glyph);
+
+        intface_glyph_windows[index] = win;
+        intface_glyph_under[index] = under;
+        intface_glyph_art[index] = art;
+        intface_glyph_w[index] = width;
+    }
+    intface_glyphs_shown = true;
+    intface_glyph_step = -1;
+}
+
+void intface_show_pad_glyphs(float trigger)
+{
+    unsigned int now = get_time();
+    float dt = (float)(now - intface_glyph_last_time);
+    intface_glyph_last_time = now;
+    if (dt > 100.0f) {
+        dt = 100.0f;
+    }
+
+    // Only over a bar that's actually showing on top (not under the
+    // inventory, dialogue, ...). The AP lights' spot is never covered by a
+    // glyph window.
+    Rect barRect;
+    bool allowed = interfaceWindow != -1
+        && !intface_is_hidden()
+        && win_get_rect(interfaceWindow, &barRect) == 0
+        && win_get_top_win(barRect.ulx + 360, barRect.uly + 10) == interfaceWindow;
+    if (!allowed) {
+        if (intface_glyphs_shown) {
+            intface_glyphs_hide();
+        }
+        return;
+    }
+
+    // Past a little slack at the top of the trigger's travel, the glyphs
+    // follow how far it's pressed, eased so they never pop.
+    float target = (trigger - 0.1f) / 0.75f;
+    if (target < 0.0f) {
+        target = 0.0f;
+    } else if (target > 1.0f) {
+        target = 1.0f;
+    }
+    float maxStep = dt / INTFACE_GLYPH_FADE_MS;
+    if (intface_glyph_alpha < target) {
+        intface_glyph_alpha = intface_glyph_alpha + maxStep < target ? intface_glyph_alpha + maxStep : target;
+    } else if (intface_glyph_alpha > target) {
+        intface_glyph_alpha = intface_glyph_alpha - maxStep > target ? intface_glyph_alpha - maxStep : target;
+    }
+
+    int step = (int)(intface_glyph_alpha * INTFACE_GLYPH_FADE_STEPS + 0.5f);
+    if (step == 0) {
+        if (intface_glyphs_shown && intface_glyph_alpha <= 0.0f) {
+            intface_glyphs_hide();
+        }
+        return;
+    }
+
+    if (!intface_glyphs_shown) {
+        intface_glyphs_open();
+    }
+    if (step != intface_glyph_step) {
+        intface_glyphs_draw(step);
+        intface_glyph_step = step;
+    }
+}
+#endif
 
 // 0x4560E4
 static int intface_item_reload()

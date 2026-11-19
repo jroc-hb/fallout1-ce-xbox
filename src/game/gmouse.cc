@@ -18,6 +18,7 @@
 #include "game/map.h"
 #include "game/map_defs.h"
 #include "game/object.h"
+#include "game/padglyph.h"
 #include "game/protinst.h"
 #include "game/textobj.h"
 #include "game/proto.h"
@@ -3256,7 +3257,7 @@ static void gmouse_near_label()
     }
 
     Rect rect;
-    if (text_object_create_label(gmouse_near, text, 101, colorTable[32747], colorTable[0], tileY - bounds.uly + 4, &rect) == 0) {
+    if (text_object_create_label(gmouse_near, text, 101, colorTable[32747], colorTable[0], tileY - bounds.uly + 4, PAD_GLYPH_A, &rect) == 0) {
         gmouse_near_labelled = true;
         tile_refresh_rect(&rect, gmouse_near->elevation);
     }

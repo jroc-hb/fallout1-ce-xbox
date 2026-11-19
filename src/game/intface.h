@@ -51,6 +51,9 @@ int intface_update_items(bool animated);
 int intface_toggle_items(bool animated);
 int intface_toggle_item_state();
 int intface_quick_reload();
+// CE: Shows gamepad glyphs over the HUD buttons with pad shortcuts, faded in
+// by how far LT is pressed (0..1); call every frame.
+void intface_show_pad_glyphs(float trigger);
 void intface_use_item();
 int intface_is_item_right_hand();
 int intface_get_current_item(Object** itemPtr);

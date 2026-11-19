@@ -199,6 +199,8 @@ target_sources(${EXECUTABLE_NAME} PUBLIC
     "src/game/worldmap.h"
     "src/game/rumble.cc"
     "src/game/rumble.h"
+    "src/game/padglyph.cc"
+    "src/game/padglyph.h"
     "src/game/skillwheel.cc"
     "src/game/skillwheel.h"
     "src/game/stickwalk.cc"
