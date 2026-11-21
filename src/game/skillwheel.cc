@@ -591,7 +591,7 @@ static const char* quick_names[WHEEL_SLOTS] = {
     "HEAL",
     "RELOAD",
     "SNEAK",
-    "WALK MODE",
+    "WALKING",
     "REST",
     "CENTER VIEW",
 };
@@ -698,7 +698,13 @@ static void quick_wheel_hint(Wheel* wheel, char* line, int size)
         snprintf(line, size, "A: Turn %s", is_pc_flag(PC_FLAG_SNEAKING) ? "off" : "on");
         break;
     case QUICK_WALK:
-        snprintf(line, size, "A: Turn %s", GamepadStickWalkEnabled() ? "off" : "on");
+        if (!GamepadStickWalkEnabled()) {
+            snprintf(line, size, "A: Free walking");
+        } else if (stick_walk_free_style()) {
+            snprintf(line, size, "A: Walk hex by hex");
+        } else {
+            snprintf(line, size, "A: Turn off");
+        }
         break;
     case QUICK_REST:
         snprintf(line, size, "%s", isInCombat() ? "Not in combat" : "A: Pick how long");
@@ -725,7 +731,8 @@ int quick_wheel_select(int closeKey)
     }
     snprintf(wheel.subs[QUICK_HEAL], sizeof(wheel.subs[QUICK_HEAL]), "x%d", quick_heal_count());
     snprintf(wheel.subs[QUICK_SNEAK], sizeof(wheel.subs[QUICK_SNEAK]), "%s", is_pc_flag(PC_FLAG_SNEAKING) ? "ON" : "OFF");
-    snprintf(wheel.subs[QUICK_WALK], sizeof(wheel.subs[QUICK_WALK]), "%s", GamepadStickWalkEnabled() ? "ON" : "OFF");
+    snprintf(wheel.subs[QUICK_WALK], sizeof(wheel.subs[QUICK_WALK]), "%s",
+        !GamepadStickWalkEnabled() ? "OFF" : (stick_walk_free_style() ? "FREE" : "HEX"));
 
     int slot = wheel_run(&wheel);
     if (slot < 0) {
@@ -753,7 +760,16 @@ int quick_wheel_select(int closeKey)
         action_skill_use(SKILL_SNEAK);
         return -1;
     case QUICK_WALK:
-        GamepadToggleStickWalk();
+        // Off -> free -> hex by hex -> off.
+        if (!GamepadStickWalkEnabled()) {
+            stick_walk_set_free_style(true);
+            GamepadToggleStickWalk();
+        } else if (stick_walk_free_style()) {
+            stick_walk_set_free_style(false);
+            quick_print("Controls: walk hex by hex.");
+        } else {
+            GamepadToggleStickWalk();
+        }
         return -1;
     case QUICK_REST:
         if (isInCombat()) {

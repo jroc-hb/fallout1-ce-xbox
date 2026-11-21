@@ -304,6 +304,20 @@ static int anim_pending_rumble = 0;
 // See anim_set_dude_steer.
 static AnimDudeSteerProc* anim_dude_steer = NULL;
 static AnimDudeTurnProc* anim_dude_turn = NULL;
+static AnimDudeStepSpeedProc* anim_dude_step_speed = NULL;
+
+// A player step in `rotation` starts: its frame time.
+static void anim_dude_step_tpf(AnimationSad* sad_entry, Object* object, int rotation)
+{
+    if (object != obj_dude || anim_dude_step_speed == NULL) {
+        return;
+    }
+    int percent = anim_dude_step_speed(object, rotation);
+    if (percent <= 0 || percent > 200) {
+        percent = 100;
+    }
+    sad_entry->ticksPerFrame = compute_tpf(object, object->fid) * percent / 100;
+}
 
 // 0x56A1E4
 static unsigned char seen[5000];
@@ -399,6 +413,11 @@ int register_begin(int requestOptions)
 void register_rumble_next(int cue)
 {
     anim_pending_rumble = curr_anim_set != -1 ? rumble_cue_merge(anim_pending_rumble, cue) : 0;
+}
+
+void anim_set_dude_step_speed(AnimDudeStepSpeedProc* proc)
+{
+    anim_dude_step_speed = proc;
 }
 
 void anim_set_dude_steer(AnimDudeSteerProc* steer, AnimDudeTurnProc* turn)
@@ -2629,6 +2648,7 @@ static void object_move(int index)
         rect_min_bound(&dirty, &temp, &dirty);
 
         sad_entry->field_20 = 0;
+        anim_dude_step_tpf(sad_entry, object, sad_entry->rotations[0]);
     } else {
         obj_inc_frame(object, &dirty);
     }
@@ -2788,6 +2808,7 @@ static void object_move(int index)
             if (sad_entry->field_20 == sad_entry->field_1C || v17) {
                 sad_entry->field_20 = -1000;
             } else {
+                anim_dude_step_tpf(sad_entry, object, sad_entry->rotations[sad_entry->field_20]);
                 obj_set_rotation(object, sad_entry->rotations[sad_entry->field_20], &temp);
                 rect_min_bound(&dirty, &temp, &dirty);
 

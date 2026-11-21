@@ -178,6 +178,11 @@ typedef int AnimDudeSteerProc(Object* obj, int* anim);
 // supported, so the walk stays on its hex line), or -1.
 typedef int AnimDudeTurnProc(Object* obj, int rotation);
 void anim_set_dude_steer(AnimDudeSteerProc* steer, AnimDudeTurnProc* turn);
+// Called when each step of the player's walk starts: the step's frame time
+// in percent of the usual (less is faster), so stick walking keeps an even
+// pace along the stick when steps zig-zag across it. NULL: always 100.
+typedef int AnimDudeStepSpeedProc(Object* obj, int rotation);
+void anim_set_dude_step_speed(AnimDudeStepSpeedProc* proc);
 
 } // namespace fallout
 

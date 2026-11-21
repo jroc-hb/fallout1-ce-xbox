@@ -6,13 +6,18 @@
 #include "game/anim.h"
 #include "game/combat.h"
 #include "game/critter.h"
+#include "game/gconfig.h"
+#include "game/perk.h"
+#include "game/art.h"
 #include "game/gmouse.h"
 #include "game/intface.h"
 #include "game/map.h"
 #include "game/map_defs.h"
 #include "game/object.h"
 #include "game/protinst.h"
+#include "game/scripts.h"
 #include "game/tile.h"
+#include "plib/gnw/debug.h"
 #include "plib/gnw/gamepad.hpp"
 #include "plib/gnw/gnw.h"
 #include "plib/gnw/input.h"
@@ -242,6 +247,615 @@ static int sw_turn(Object* obj, int rotation)
     return reverse;
 }
 
+// anim.cc's hook, as a step starts: its frame time in percent. A hex step
+// is one hex in the world whichever way it goes, but zig-zagging only part
+// of it is progress along the stick: cos of the angle between them, in
+// world space (the screen squashes the vertical: a NE step is 16 x -12 px
+// for 0.5 x 0.87 hexes).
+static int sw_step_speed(Object* obj, int rotation)
+{
+    if (obj != obj_dude || !sw_fresh() || isInCombat()) {
+        return 100;
+    }
+
+    float stickX = sw_dir_x / 32.0f;
+    float stickY = -sw_dir_y / 13.86f;
+    float stepX = (float)off_tile[0][rotation] / 32.0f;
+    float stepY = -(float)off_tile[1][rotation] / 13.86f;
+    const float stickLength = std::sqrt(stickX * stickX + stickY * stickY);
+    const float stepLength = std::sqrt(stepX * stepX + stepY * stepY);
+    if (stickLength <= 0.0f || stepLength <= 0.0f) {
+        return 100;
+    }
+    float cosine = (stickX * stepX + stickY * stepY) / (stickLength * stepLength);
+    if (cosine < 0.8f) {
+        cosine = 0.8f; // sliding along a wall: don't rush
+    }
+    if (cosine > 1.0f) {
+        cosine = 1.0f;
+    }
+    return (int)(cosine * 100.0f + 0.5f);
+}
+
+// --- Free movement ---------------------------------------------------------
+//
+// Walk mode's default style (`[control] stick_walk_free`, 1): outside combat
+// the player moves continuously in the stick's direction instead of hex by
+// hex. The position is the player's hex plus its pixel offset (obj->x/y, the
+// same offset the engine uses mid-step), carried with sub-pixel precision.
+// Crossing into another hex goes through obj_move_to_tile (exit grids, roofs,
+// the see-through egg) and scr_chk_spatials_in, as a finished engine step
+// does; the hex is always the one nearest the player's feet, so the offset
+// stays within half a hex. The walk/run frames are advanced by distance, so
+// the stride matches the speed. Releasing the stick glides back to the hex
+// centre; anything that needs the player exactly on a hex (actions, menus,
+// combat, the wheels) snaps there first (sw_free_snap).
+
+// Hexes are regular in the world; on screen a step east is 32 px and a step
+// north-east 16 x -12 px, so world units are x / 32 and -y / 13.86.
+static constexpr float kWorldX = 32.0f;
+static constexpr float kWorldY = 13.856f;
+// Keep a facing until another is nearer the stick by this much (radians,
+// 5 degrees): straight up sits between NE and NW, and flipping between them
+// looked bad. Larger (it was ~0.15 cosine) and the facing lagged the stick
+// visibly (user report: right -> down-right kept the right facing).
+static constexpr float kFacingKeepAngle = 0.087f;
+// Slowest walk, as a share of the full walk, for a light push.
+static constexpr float kMinWalkShare = 0.45f;
+
+static int sw_free_style = -1; // -1: not read yet
+static bool sw_free_moving = false; // our walk/run art is on the player
+static int sw_free_rotation = -1;
+static float sw_free_x = 0.0f; // the player's offset from its hex centre
+static float sw_free_y = 0.0f;
+static int sw_free_tile = -1;
+static float sw_free_frame = 0.0f; // progress through the current frame, 0..1
+// Speeding up from a standstill (0..1).
+static float sw_free_ramp = 0.0f;
+// Stopping: the hex walked on to after the stick is let go (-1: none).
+static int sw_free_stop_tile = -1;
+// The last walking speed (share of the art's), kept while stopping.
+static float sw_free_scale = 1.0f;
+// The art the pace figures (sw_free_measure) are for.
+static int sw_free_art_fid = -1;
+static int sw_free_art_rotation = -1;
+
+// Dev menu (XBOX OPTS): how free movement paces and stops, so the older
+// versions can be compared. Pace 1 = stride (the art's own per-frame steps), 0
+// = glide (constant speed); stop 1 = step (speed-up from a standstill, walk
+// on to a hex centre on release), 0 = slide (full speed at once, glide back
+// onto the current hex on release).
+static int sw_dev_pace = -1;
+static int sw_dev_stop = -1;
+
+static int sw_dev_read(const char* key, int* cache)
+{
+    if (*cache == -1) {
+        int value = 1;
+        config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, key, &value);
+        *cache = value != 0 ? 1 : 0;
+    }
+    return *cache;
+}
+
+int stick_walk_dev_pace()
+{
+    return sw_dev_read("free_walk_pace", &sw_dev_pace);
+}
+
+int stick_walk_dev_stop()
+{
+    return sw_dev_read("free_walk_stop", &sw_dev_stop);
+}
+
+void stick_walk_set_dev(int pace, int stop)
+{
+    sw_dev_pace = pace != 0 ? 1 : 0;
+    sw_dev_stop = stop != 0 ? 1 : 0;
+    config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, "free_walk_pace", sw_dev_pace);
+    config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, "free_walk_stop", sw_dev_stop);
+}
+
+bool stick_walk_free_style()
+{
+    if (sw_free_style == -1) {
+        int value = 1;
+        config_get_value(&game_config, GAME_CONFIG_CONTROL_KEY, "stick_walk_free", &value);
+        sw_free_style = value != 0 ? 1 : 0;
+    }
+    return sw_free_style == 1;
+}
+
+static void sw_free_snap();
+
+void stick_walk_set_free_style(bool free)
+{
+    if (!free) {
+        sw_free_snap();
+    }
+    sw_free_style = free ? 1 : 0;
+    config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, "stick_walk_free", sw_free_style);
+    gconfig_save();
+}
+
+void stick_walk_set_free_style_nosave(bool free)
+{
+    sw_free_style = free ? 1 : 0;
+    config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, "stick_walk_free", sw_free_style);
+}
+
+static int sw_free_round(float value)
+{
+    return value >= 0.0f ? (int)(value + 0.5f) : -(int)(-value + 0.5f);
+}
+
+// World length of a screen vector, in hexes.
+static float sw_world_length(float x, float y)
+{
+    const float wx = x / kWorldX;
+    const float wy = y / kWorldY;
+    return std::sqrt(wx * wx + wy * wy);
+}
+
+// The art's pace: how far each frame carries the player (the per-frame
+// shifts baked into it, as world hexes; frame k's is the step into it) and
+// its fps. Free movement moves by these, spread smoothly over each frame,
+// so a planted foot stays put as in the engine's own walk.
+#define SW_FREE_MAX_FRAMES 32
+static float sw_free_shift[SW_FREE_MAX_FRAMES];
+static int sw_free_frames = 0;
+static int sw_free_fps = 10;
+
+static void sw_free_measure(int fid, int rotation)
+{
+    if (fid == sw_free_art_fid && rotation == sw_free_art_rotation) {
+        return;
+    }
+    sw_free_art_fid = fid;
+    sw_free_art_rotation = rotation;
+    sw_free_frames = 0;
+    sw_free_fps = 10;
+
+    CacheEntry* handle;
+    Art* art = art_ptr_lock(fid, &handle);
+    if (art == NULL) {
+        return;
+    }
+    int frames = art_frame_max_frame(art);
+    if (frames > SW_FREE_MAX_FRAMES) {
+        frames = SW_FREE_MAX_FRAMES;
+    }
+    for (int frame = 0; frame < frames; frame++) {
+        int x;
+        int y;
+        art_frame_hot(art, frame, rotation, &x, &y);
+        sw_free_shift[frame] = sw_world_length((float)x, (float)y);
+    }
+    sw_free_frames = frames;
+    if (art_frame_fps(art) > 0) {
+        sw_free_fps = art_frame_fps(art);
+    }
+    art_ptr_unlock(handle);
+}
+
+static int sw_free_fid(int anim, int rotation)
+{
+    const int fid = obj_dude->fid;
+    return art_id(FID_TYPE(fid), fid & 0xFFF, anim, (fid & 0xF000) >> 12, rotation + 1);
+}
+
+// The player stands where it is (on its hex centre or not).
+static void sw_free_stand(Rect* dirty)
+{
+    Rect rect;
+    int fid = sw_free_fid(ANIM_STAND, obj_dude->rotation);
+    if (art_exists(fid)) {
+        obj_change_fid(obj_dude, fid, &rect);
+        rect_min_bound(dirty, &rect, dirty);
+    }
+    obj_set_frame(obj_dude, 0, &rect);
+    rect_min_bound(dirty, &rect, dirty);
+    sw_free_moving = false;
+}
+
+// Back onto the hex centre at once, standing.
+static void sw_free_snap()
+{
+    if (obj_dude == NULL) {
+        return;
+    }
+    Rect dirty;
+    obj_bound(obj_dude, &dirty);
+    if (obj_dude->x != 0 || obj_dude->y != 0) {
+        Rect rect;
+        obj_offset(obj_dude, -obj_dude->x, -obj_dude->y, &rect);
+        rect_min_bound(&dirty, &rect, &dirty);
+    }
+    sw_free_x = 0.0f;
+    sw_free_y = 0.0f;
+    if (sw_free_moving) {
+        sw_free_stand(&dirty);
+    }
+    tile_refresh_rect(&dirty, obj_dude->elevation);
+}
+
+// The neighbour (rotation) whose centre is nearer the point (offset from the
+// current hex centre) than the current one's, or -1.
+static int sw_free_nearest(float x, float y)
+{
+    int best = -1;
+    float bestDistance = sw_world_length(x, y);
+    for (int rotation = 0; rotation < ROTATION_COUNT; rotation++) {
+        const float distance = sw_world_length(x - (float)off_tile[0][rotation], y - (float)off_tile[1][rotation]);
+        if (distance < bestDistance) {
+            best = rotation;
+            bestDistance = distance;
+        }
+    }
+    return best;
+}
+
+// Whether the player can stand on the hex next to it in `rotation`.
+static bool sw_free_open(int rotation)
+{
+    const int tile = tile_num_in_direction(obj_dude->tile, rotation, 1);
+    return hexGridTileIsValid(tile) && obj_blocking_at(obj_dude, tile, obj_dude->elevation) == NULL;
+}
+
+// Whether moving the player by (dx, dy) is possible (not into a blocked hex).
+static bool sw_free_can_move(float dx, float dy)
+{
+    const int rotation = sw_free_nearest(sw_free_x + dx, sw_free_y + dy);
+    return rotation == -1 || sw_free_open(rotation);
+}
+
+// Moves the player by (dx, dy) screen px, crossing into the next hex when
+// that one is nearer. The caller checked it's free.
+static void sw_free_move(float dx, float dy, Rect* dirty)
+{
+    sw_free_x += dx;
+    sw_free_y += dy;
+
+    Rect rect;
+    const int rotation = sw_free_nearest(sw_free_x, sw_free_y);
+    if (rotation != -1) {
+        const int tile = tile_num_in_direction(obj_dude->tile, rotation, 1);
+        sw_free_x -= (float)off_tile[0][rotation];
+        sw_free_y -= (float)off_tile[1][rotation];
+
+        // As a finished engine step: the hex (exit grids, roofs, the egg),
+        // then the new hex's spatial scripts.
+        obj_move_to_tile(obj_dude, tile, obj_dude->elevation, &rect);
+        rect_min_bound(dirty, &rect, dirty);
+        sw_free_tile = obj_dude->tile;
+        scr_chk_spatials_in(obj_dude, obj_dude->tile, obj_dude->elevation);
+    }
+
+    const int offsetX = sw_free_round(sw_free_x) - obj_dude->x;
+    const int offsetY = sw_free_round(sw_free_y) - obj_dude->y;
+    if (offsetX != 0 || offsetY != 0) {
+        obj_offset(obj_dude, offsetX, offsetY, &rect);
+        rect_min_bound(dirty, &rect, dirty);
+    }
+}
+
+// Angle (radians, 0..pi) between a facing and a screen direction.
+static float sw_free_angle_to(int rotation, float dirX, float dirY)
+{
+    float x;
+    float y;
+    sw_step_dir(rotation, &x, &y);
+    float cosine = x * dirX + y * dirY;
+    float sine = x * dirY - y * dirX;
+    return std::fabs(std::atan2(sine, cosine));
+}
+
+// The facing nearest the direction (screen, unit), keeping the current one
+// unless another is nearer by kFacingKeepAngle (only so straight up, halfway
+// between NE and NW, doesn't flicker).
+static int sw_free_facing(float dirX, float dirY, int current)
+{
+    int best = -1;
+    float bestAngle = 10.0f;
+    for (int rotation = 0; rotation < ROTATION_COUNT; rotation++) {
+        const float angle = sw_free_angle_to(rotation, dirX, dirY);
+        if (angle < bestAngle) {
+            best = rotation;
+            bestAngle = angle;
+        }
+    }
+    if (current >= 0 && current < ROTATION_COUNT && best != current
+        && sw_free_angle_to(current, dirX, dirY) - bestAngle < kFacingKeepAngle) {
+        return current;
+    }
+    return best;
+}
+
+// Time to reach full speed from a standstill.
+static constexpr float kFreeRampSeconds = 0.12f;
+
+// The point (offset from the current hex centre, screen px) of hex `tile`,
+// if it's the current one or a neighbour.
+static bool sw_free_tile_offset(int tile, float* x, float* y)
+{
+    if (tile == obj_dude->tile) {
+        *x = 0.0f;
+        *y = 0.0f;
+        return true;
+    }
+    for (int rotation = 0; rotation < ROTATION_COUNT; rotation++) {
+        if (tile_num_in_direction(obj_dude->tile, rotation, 1) == tile) {
+            *x = (float)off_tile[0][rotation];
+            *y = (float)off_tile[1][rotation];
+            return true;
+        }
+    }
+    return false;
+}
+
+// Plays the art on by `frames` (fractional) and returns the distance
+// (hexes) its steps cover meanwhile; *advanced gets the whole frames passed.
+static float sw_free_play(float frames, int* frame, int* advanced)
+{
+    float distance = 0.0f;
+    *advanced = 0;
+    if (sw_free_frames <= 0) {
+        return 0.0f;
+    }
+    while (frames > 0.0f) {
+        const float part = std::fmin(frames, 1.0f - sw_free_frame);
+        const int next = (*frame + 1) % sw_free_frames;
+        // During frame k the player covers the step into frame k + 1, so
+        // it's where the engine would put it each time the image changes.
+        distance += sw_free_shift[next] * part;
+        sw_free_frame += part;
+        frames -= part;
+        if (sw_free_frame >= 0.999f) {
+            sw_free_frame = 0.0f;
+            *frame = next;
+            (*advanced)++;
+        }
+    }
+    return distance;
+}
+
+// One frame of free movement. `deflection` 0..1 (0: the stick is let go:
+// walk on to a hex centre and stand). Returns whether the player moved.
+static bool sw_free_update(float deflection, float dt)
+{
+    // Someone else moved the player (an engine walk, a map change, a
+    // script): start from where it is now.
+    if (obj_dude->tile != sw_free_tile
+        || sw_free_round(sw_free_x) != obj_dude->x
+        || sw_free_round(sw_free_y) != obj_dude->y) {
+        sw_free_tile = obj_dude->tile;
+        sw_free_x = (float)obj_dude->x;
+        sw_free_y = (float)obj_dude->y;
+        sw_free_stop_tile = -1;
+        if (sw_free_moving && FID_ANIM_TYPE(obj_dude->fid) != ANIM_WALK && FID_ANIM_TYPE(obj_dude->fid) != ANIM_RUNNING) {
+            sw_free_moving = false;
+        }
+    }
+
+    // An engine animation (a clicked walk, a door, a script) has the
+    // player: wait for it.
+    if (anim_busy(obj_dude)) {
+        sw_free_moving = false;
+        sw_free_stop_tile = -1;
+        return false;
+    }
+
+    Rect dirty;
+    obj_bound(obj_dude, &dirty);
+
+    const bool stopping = deflection <= 0.0f;
+    if (stopping && !sw_free_moving) {
+        // Standing: on its hex centre, nothing to do; off it (stopped
+        // against a wall), walk the few pixels there.
+        sw_free_ramp = 0.0f;
+        if (obj_dude->x == 0 && obj_dude->y == 0) {
+            return false;
+        }
+        sw_free_rotation = obj_dude->rotation;
+        sw_free_scale = kMinWalkShare;
+    }
+
+    bool run;
+    int rotation;
+    float dirX; // world direction of the move (unit)
+    float dirY;
+    float left = 1000.0f; // stopping: the distance to the stop point (hexes)
+
+    if (!stopping) {
+        sw_free_stop_tile = -1;
+        sw_free_ramp = stick_walk_dev_stop() ? std::fmin(1.0f, sw_free_ramp + dt / kFreeRampSeconds) : 1.0f;
+        run = deflection >= kRunDeflection
+            && (obj_dude->data.critter.combat.results & DAM_CRIP_LEG_ANY) == 0
+            && !(is_pc_flag(PC_FLAG_SNEAKING) && !perk_level(PERK_SILENT_RUNNING));
+        rotation = sw_free_facing(sw_dir_x, sw_dir_y, sw_free_moving ? sw_free_rotation : obj_dude->rotation);
+        dirX = sw_dir_x / kWorldX;
+        dirY = sw_dir_y / kWorldY;
+        sw_free_scale = run ? 1.0f : std::fmax(kMinWalkShare, std::fmin(1.0f, deflection / kRunDeflection));
+    } else {
+        // Let go: carry on to the nearest hex centre half a hex ahead (not
+        // back), in the same stride, then stand.
+        run = FID_ANIM_TYPE(obj_dude->fid) == ANIM_RUNNING;
+        rotation = sw_free_rotation;
+        float stopX = 0.0f;
+        float stopY = 0.0f;
+        if (!stick_walk_dev_stop()) {
+            // Older stop: glide straight back onto the hex it's on.
+            sw_free_stop_tile = obj_dude->tile;
+        }
+        if (sw_free_stop_tile == -1 || !sw_free_tile_offset(sw_free_stop_tile, &stopX, &stopY)) {
+            float ux;
+            float uy;
+            sw_step_dir(rotation, &ux, &uy);
+            // Half a hex ahead along the facing, in screen px.
+            const float aheadLength = sw_world_length(ux, uy);
+            const float aheadX = sw_free_x + ux / aheadLength * 0.5f;
+            const float aheadY = sw_free_y + uy / aheadLength * 0.5f;
+            const int nearest = sw_free_nearest(aheadX, aheadY);
+            sw_free_stop_tile = obj_dude->tile;
+            if (nearest != -1 && sw_free_open(nearest)) {
+                sw_free_stop_tile = tile_num_in_direction(obj_dude->tile, nearest, 1);
+            }
+            sw_free_tile_offset(sw_free_stop_tile, &stopX, &stopY);
+        }
+        dirX = (stopX - sw_free_x) / kWorldX;
+        dirY = (stopY - sw_free_y) / kWorldY;
+        left = std::sqrt(dirX * dirX + dirY * dirY);
+        // Facing the way it goes (back onto the hex after a wall: turned).
+        const float screenX = stopX - sw_free_x;
+        const float screenY = stopY - sw_free_y;
+        const float screenLength = std::sqrt(screenX * screenX + screenY * screenY);
+        if (screenLength > 2.0f && stick_walk_dev_stop()) {
+            rotation = sw_free_facing(screenX / screenLength, screenY / screenLength, rotation);
+        }
+        if (left < 0.01f) {
+            // There: stand on the hex centre.
+            Rect rect;
+            if (obj_dude->x != 0 || obj_dude->y != 0) {
+                obj_offset(obj_dude, -obj_dude->x, -obj_dude->y, &rect);
+                rect_min_bound(&dirty, &rect, &dirty);
+            }
+            sw_free_x = 0.0f;
+            sw_free_y = 0.0f;
+            sw_free_stop_tile = -1;
+            sw_free_ramp = 0.0f;
+            sw_free_stand(&dirty);
+            tile_refresh_rect(&dirty, obj_dude->elevation);
+            return false;
+        }
+    }
+
+    const float dirLength = std::sqrt(dirX * dirX + dirY * dirY);
+    if (dirLength <= 0.0f) {
+        return false;
+    }
+    dirX /= dirLength;
+    dirY /= dirLength;
+
+    // The walk or run art for that facing.
+    int anim = run ? ANIM_RUNNING : ANIM_WALK;
+    int fid = sw_free_fid(anim, rotation);
+    if (!art_exists(fid)) {
+        anim = ANIM_WALK;
+        fid = sw_free_fid(anim, rotation);
+        if (!art_exists(fid)) {
+            return false;
+        }
+    }
+    sw_free_measure(fid, rotation);
+
+    // Switch the art (facing, walk/run), keeping the place in the stride.
+    // (A critter's fid is the same for every facing: compare the rotation too.)
+    Rect rect;
+    if (!sw_free_moving || obj_dude->fid != fid || obj_dude->rotation != rotation) {
+        int frame = obj_dude->frame;
+        if (!sw_free_moving) {
+            frame = 0;
+            sw_free_frame = 0.0f;
+        }
+        if (frame >= sw_free_frames) {
+            frame = 0;
+        }
+        obj_change_fid(obj_dude, fid, &rect);
+        rect_min_bound(&dirty, &rect, &dirty);
+        obj_set_rotation(obj_dude, rotation, &rect);
+        rect_min_bound(&dirty, &rect, &dirty);
+        obj_set_frame(obj_dude, frame, &rect);
+        rect_min_bound(&dirty, &rect, &dirty);
+        sw_free_moving = true;
+    }
+    sw_free_rotation = rotation;
+
+    // Play the art on and move by its steps (slower for a light push or
+    // while speeding up; at full pace while stopping).
+    const float scale = stopping ? sw_free_scale : sw_free_scale * (0.3f + 0.7f * sw_free_ramp);
+    int frame = obj_dude->frame;
+    int advanced = 0;
+    const float framesToPlay = dt * (float)sw_free_fps * scale;
+    float hexes = sw_free_play(framesToPlay, &frame, &advanced);
+    if (!stick_walk_dev_pace() && sw_free_frames > 0) {
+        // Older pace: the cycle's average step, at a constant speed.
+        float cycle = 0.0f;
+        for (int index = 0; index < sw_free_frames; index++) {
+            cycle += sw_free_shift[index];
+        }
+        hexes = framesToPlay * cycle / (float)sw_free_frames;
+    }
+    if (stopping && hexes > left) {
+        hexes = left;
+    }
+
+    float moveX = dirX * hexes * kWorldX;
+    float moveY = dirY * hexes * kWorldY;
+
+    // Blocked: slide along the wall, else stop. A closed door stops it:
+    // pushing into one opens it (stick_walk_update), sliding would walk past.
+    if (!sw_free_can_move(moveX, moveY)) {
+        const int blockedRotation = sw_free_nearest(sw_free_x + moveX, sw_free_y + moveY);
+        Object* blocker = NULL;
+        if (blockedRotation != -1) {
+            const int tile = tile_num_in_direction(obj_dude->tile, blockedRotation, 1);
+            blocker = hexGridTileIsValid(tile) ? obj_blocking_at(obj_dude, tile, obj_dude->elevation) : NULL;
+        }
+        if (blocker != NULL && FID_TYPE(blocker->fid) == OBJ_TYPE_SCENERY && obj_is_a_portal(blocker) && !obj_is_open(blocker)) {
+            moveX = 0.0f;
+            moveY = 0.0f;
+        } else {
+            // Take off the part heading into the blocked hex (towards its
+            // centre, in world space): what's left runs along the border
+            // between the two hexes. Twice, for a corner of two.
+            float wx = moveX / kWorldX;
+            float wy = moveY / kWorldY;
+            for (int pass = 0; pass < 2; pass++) {
+                const int blocked = sw_free_nearest(sw_free_x + wx * kWorldX, sw_free_y + wy * kWorldY);
+                if (blocked == -1 || sw_free_open(blocked)) {
+                    break;
+                }
+                float nx = (float)off_tile[0][blocked] / kWorldX;
+                float ny = (float)off_tile[1][blocked] / kWorldY;
+                const float nlen = std::sqrt(nx * nx + ny * ny);
+                nx /= nlen;
+                ny /= nlen;
+                const float into = wx * nx + wy * ny;
+                if (into <= 0.0f) {
+                    break;
+                }
+                wx -= into * nx;
+                wy -= into * ny;
+            }
+            moveX = wx * kWorldX;
+            moveY = wy * kWorldY;
+            if (!sw_free_can_move(moveX, moveY)) {
+                moveX = 0.0f;
+                moveY = 0.0f;
+            }
+        }
+
+        if (moveX == 0.0f && moveY == 0.0f) {
+            // Against a wall: stand where it is (and maybe open the door
+            // there); it settles onto the hex when the stick is let go.
+            sw_free_ramp = 0.0f;
+            sw_free_stand(&dirty);
+            tile_refresh_rect(&dirty, obj_dude->elevation);
+            return false;
+        }
+    }
+
+    sw_free_move(moveX, moveY, &dirty);
+    if (advanced > 0) {
+        obj_set_frame(obj_dude, frame, &rect);
+        rect_min_bound(&dirty, &rect, &dirty);
+    }
+
+    tile_refresh_rect(&dirty, obj_dude->elevation);
+    return true;
+}
+
+
 // Starts a one-hex walk the stick's way; sw_steer extends it.
 static bool sw_start()
 {
@@ -310,6 +924,7 @@ StickWalkResult stick_walk_update(float x, float y, float dt)
 {
     if (!sw_installed) {
         anim_set_dude_steer(sw_steer, sw_turn);
+        anim_set_dude_step_speed(sw_step_speed);
         sw_installed = true;
     }
 
@@ -334,7 +949,10 @@ StickWalkResult stick_walk_update(float x, float y, float dt)
         allowed = gmouse_walk_allowed();
     }
     if (!allowed) {
-        // A dialog, menu or combat needs the pointer.
+        // A dialog, menu or combat needs the pointer, and the player on a hex.
+        if (obj_dude != NULL && !anim_busy(obj_dude)) {
+            sw_free_snap();
+        }
         gmouse_walk_show_pointer(false);
         sw_walking = false;
         sw_follow = false;
@@ -374,7 +992,17 @@ StickWalkResult stick_walk_update(float x, float y, float dt)
         sw_dir_y = dirY;
         sw_run = length >= kRunDeflection;
 
-        if (!anim_busy(obj_dude)) {
+        if (stick_walk_free_style()) {
+            sw_walking = sw_free_update(length, dt);
+            if (!sw_walking && !anim_busy(obj_dude)) {
+                Object* door = sw_door_ahead();
+                if (door != NULL && door != sw_door_tried) {
+                    sw_door_tried = door;
+                    sw_free_snap();
+                    action_use_an_object(obj_dude, door);
+                }
+            }
+        } else if (!anim_busy(obj_dude)) {
             sw_walking = sw_start();
 
             // Blocked by a closed door the stick points into: open it (once
@@ -401,6 +1029,9 @@ StickWalkResult stick_walk_update(float x, float y, float dt)
     } else {
         sw_walking = false;
         sw_door_tried = NULL;
+        if (stick_walk_free_style() && sw_free_update(0.0f, dt)) {
+            sw_follow = true;
+        }
     }
 
     // With the pointer hidden, the object next to the player is highlighted
@@ -424,6 +1055,9 @@ void stick_walk_pause(bool paused)
     sw_in_menu = paused;
     if (paused) {
         sw_walking = false;
+        if (obj_dude != NULL && !anim_busy(obj_dude)) {
+            sw_free_snap();
+        }
     }
 }
 
@@ -453,6 +1087,12 @@ void stick_walk_request_combat()
 
 void stick_walk_run_pending()
 {
+    if ((sw_combat_pending || sw_use_pending || sw_menu_pending || sw_look_pending)
+        && obj_dude != NULL && !anim_busy(obj_dude)) {
+        // Actions start from a hex.
+        sw_free_snap();
+    }
+
     const bool fight = sw_combat_pending && elapsed_time(sw_combat_time) < 500;
     sw_combat_pending = false;
     if (fight && !isInCombat() && intface_is_enabled()) {

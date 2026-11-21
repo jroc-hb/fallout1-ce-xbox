@@ -58,6 +58,11 @@ second).
 
 ## Walk mode in detail
 
+Walk mode moves **freely** by default: the character goes exactly where the stick points,
+at a steady pace, sliding along walls, and settles onto the hex grid when you let go (or
+before any action, conversation or fight). The older hex-by-hex style is still in the quick
+wheel (hold **Back** → **Walking**).
+
 - **What gets highlighted**: the nearest person, item, door or usable object within two
   steps, preferring what you're facing. Things behind a wall aren't picked.
 - **A (tap)** does what clicking the object would: talk, pick up, open, search or use.
@@ -129,7 +134,7 @@ last, so repeating one (another heal) is just hold **Back**, **A**.
 | Right | Heal | Uses your best healing item on yourself: a stimpak, healing powder, or a super stimpak when you're badly hurt. Shows how many you carry. Costs the same AP as opening the inventory in combat |
 | Down-right | Reload | Reloads the weapon in your active hand |
 | Down | Sneak | Sneak on/off |
-| Down-left | Walk mode | Walk mode on/off (same as clicking the left stick) |
+| Down-left | Walking | Cycles walk mode: off, free (move in any direction), hex (step hex by hex, the older style). Clicking the left stick turns walk mode on/off in the last style |
 | Left | Rest | Opens the Pip-Boy's alarm clock (not in combat) |
 | Up-left | Center view | Centres the camera on your character |
 
@@ -169,7 +174,9 @@ Menus are played with the **d-pad**, without the pointer:
   to the highlight.
 
 With the pointer showing, **B** right-clicks. In conversations, **Y** opens Barter. In XBOX OPTS, the d-pad moves
-between settings and changes them, **Start** applies and **Back** or **B** cancels. **Start** also backs
+between settings and changes them, **Start** applies and **Back** or **B** cancels. **Y** opens
+the **Dev menu**: settings for comparing versions of features in development (for now, free
+walking's pace and stop). **Start** also backs
 out of the character selection screen.
 
 ## Inventory, looting and bartering

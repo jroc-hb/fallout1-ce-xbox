@@ -204,7 +204,7 @@ out so it fits (`PRFSLDOF/ON.FRM` knobs), and the bottom button strip in place w
 DISPLAY, PAN CENTERS CURSOR, POINTER ASSIST (OFF/ON/+RUMBLE), EDGE SCROLL, SWAP STICKS. Sliders:
 POINTER/CAMERA deadzone and sensitivity (the `left_stick_*`/`right_stick_*` keys: "left" is the
 pointer stick, whichever physical stick that is), SAFE AREA, RUMBLE. The hint corner says
-"CHANGING THIS RESTARTS GAME" while DISPLAY or SAFE AREA is selected. Coordinates are the Preferences screen's (`options.cc` `btndat`, `UpdateThing`),
+"RESTARTS GAME" while DISPLAY or SAFE AREA is selected, plus "Y: DEV MENU" always. Coordinates are the Preferences screen's (`options.cc` `btndat`, `UpdateThing`),
 shifted as noted in the file. D-pad up/down selects, left/right changes, START (sent as Escape)
 applies, BACK (F11) or B (padnav back key F11) cancels; the mouse works on the knobs, sliders and buttons too.
 - It edits `f1_res.ini` (`[MAIN] SCR_WIDTH/SCR_HEIGHT` = video mode, `[XBOX] UI_SCALE` 0-2 and
@@ -557,6 +557,53 @@ inventory while the left stick moved the pointer.
 - Deflection >= 0.85 runs, less walks; it switches at hex boundaries (art changed in the hook,
   frame scaled to the same share of the new cycle so the stride carries on). Sneaking or a
   crippled leg always walks.
+- **Free movement** (walk mode's default style, `[control] stick_walk_free` 1; the quick wheel's
+  WALKING entry cycles OFF -> FREE -> HEX; `sw_free_update`). Outside combat the player moves
+  continuously: position = hex + pixel offset (`obj->x/y`, via `obj_offset`, which also moves
+  the egg), kept with sub-pixel floats; the hex is always the one whose centre is nearest in
+  world space (screen x / 32, y / 13.86: hexes are regular in the world), so the offset stays
+  within half a hex. Crossing a hex calls `obj_move_to_tile` (exit grids, roofs, egg, seen) and
+  `scr_chk_spatials_in`, as a finished engine step. Pace from the art (`sw_free_measure`,
+  `sw_free_play`): the art plays at its fps (times 0.45-1 for a light push, and a 0.12 s ramp
+  from a standstill, 30% -> 100%), and during frame k the player covers the art's own step into
+  frame k+1 (its per-frame shift, as world hexes), spread smoothly: the player is where the
+  engine would put it each time the image changes, so planted feet don't drift as they did with
+  a constant speed (user feedback: "sliding"). Same speed every world direction (walk ~2.6, run
+  ~7.9 hexes/s for the vault suit; straight up on screen is slow because the view squashes it,
+  as slow as the engine's zig-zag). Letting go: it walks on in the same stride to the hex centre
+  nearest half a hex ahead (`sw_free_stop_tile`, facing the way it goes) and then stands,
+  instead of gliding back with the walk frames playing; stopped against a wall, letting go walks
+  the few pixels back onto the hex. Facing: the nearest of the 6 to the stick (angles via atan2), kept until
+  another is nearer by 5 degrees (only so straight up, halfway between NE and NW, doesn't
+  flicker; a 0.15-cosine margin made right -> down-right keep facing right until ~30 degrees,
+  user report). A critter's fid is the same for every facing, so a facing change must be detected by
+  comparing `obj->rotation` (it once compared only the fid: the facing never updated after the
+  walk started, so a gradual stick turn ran the player backwards; user report). Blocked: the part of the move toward the blocked hex's centre is removed (twice, for
+  corners), so it slides along the border; a closed door stops it instead so the push opens it
+  (`sw_door_ahead`, after `sw_free_snap`). `sw_free_snap` (offset 0, stand) runs before A use / menu / look / combat, in
+  `stick_walk_pause` (wheels) and whenever walking isn't allowed (dialogue, menus, combat). An
+  engine animation on the player (clicked walk, door, script) is waited for; anything else
+  moving the player is picked up by re-reading tile/offset each frame. Verified in XEMU (logs):
+  speeds, straight-up run to the Cathedral door, slide along the wall next to it, door opened,
+  ran inside (roof hidden). Not tested: exit grids, spatial scripts, combat start mid-offset,
+  saving mid-offset (the offset is saved with the object; harmless).
+- **Dev menu** (XBOX OPTS, Y or the hint corner; `xo_dev_menu` in xboxopts.cc): a small window
+  over XBOX OPTS built from the same art (title band, three copies of the PAN CENTERS CURSOR
+  knob panel, the DONE plate). WALK STYLE HEX/FREE (`stick_walk_free`), FREE WALK PACE
+  GLIDE/STRIDE (`[control] free_walk_pace`: 0 = constant speed at the cycle's average step,
+  the first free version; 1 = the art's per-frame steps), FREE WALK STOP SLIDE/STEP
+  (`free_walk_stop`: 0 = full speed at once and glide back onto the current hex on release;
+  1 = the 0.12 s ramp and walking on to a hex ahead). D-pad up/down/left/right, A turns the
+  selected knob, START/DONE applies (saved with `gconfig_save`), B/BACK cancels. A and B are
+  read with the screen capture: walk mode's hidden-pointer A handling otherwise ate A here.
+  Verified in XEMU: open, change, apply, reopen shows it, B cancels.
+- Pace (hex style): `anim_set_dude_step_speed(sw_step_speed)` (anim.cc, applied as each player step starts)
+  scales a step's frame time by the cosine between step and stick in world space (screen y /
+  13.86, x / 32: every hex step is the same world length), floor 0.8, so zig-zagging straight up
+  (30 degrees off each step) isn't 13% slower. A drawn-pose layer (steady facing + drawing the
+  sprite on a straight line over the zig-zag) was tried and removed: correcting the drawn
+  position every frame against a position that moves in per-anim-frame jumps made the sprite
+  visibly vibrate (user feedback).
 - Turning back mid-step: `anim_dude_turn` (`sw_turn`) is asked every frame of the step. If the
   stick points within ~60 degrees of straight back, the step is less than half done and the hex
   behind is free, the step is turned around in place (rotation flipped, path set to the reverse).

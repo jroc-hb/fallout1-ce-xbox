@@ -38,6 +38,22 @@ void stick_walk_run_pending();
 // neither walks nor moves anything.
 void stick_walk_pause(bool paused);
 
+// Walk mode's style: free movement (true, default) or hex by hex.
+// `[control] stick_walk_free`.
+bool stick_walk_free_style();
+void stick_walk_set_free_style(bool free);
+
+// Without saving the config (the caller saves).
+void stick_walk_set_free_style_nosave(bool free);
+
+// Dev menu (XBOX OPTS): free movement's pace (1 stride: the art's per-frame
+// steps; 0 glide: constant speed) and stop (1 step: speed-up and walk on to a
+// hex; 0 slide: instant and glide back). `[control] free_walk_pace/_stop`.
+// The setter doesn't save the config.
+int stick_walk_dev_pace();
+int stick_walk_dev_stop();
+void stick_walk_set_dev(int pace, int stop);
+
 } // namespace fallout
 
 #endif /* FALLOUT_GAME_STICKWALK_H_ */

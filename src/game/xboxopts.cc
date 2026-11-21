@@ -13,6 +13,7 @@
 #include "game/gconfig.h"
 #include "game/gsound.h"
 #include "game/object_types.h"
+#include "game/stickwalk.h"
 #include "plib/color/color.h"
 #include "plib/gnw/button.h"
 #include "plib/gnw/debug.h"
@@ -118,6 +119,7 @@ typedef enum XboxOptsItem {
 #define XO_EVENT_DONE 504
 #define XO_EVENT_DEFAULT 527
 #define XO_EVENT_CANCEL 528
+#define XO_EVENT_DEV 529
 #define XO_EVENT_ITEM 610 // + item index
 
 typedef struct XboxOptsKnob {
@@ -310,10 +312,10 @@ static void xo_draw()
     // Controller hints in the empty corner, or a restart warning while a
     // display setting is selected.
     text_font(101);
-    const char* hints[2] = { "START: DONE", "BACK: CANCEL" };
+    const char* hints[2] = { "Y: DEV MENU", "BACK: CANCEL" };
     if (xo_selected == XO_ITEM_DISPLAY || xo_selected == XO_ITEM_SAFE_AREA) {
-        hints[0] = "CHANGING THIS";
-        hints[1] = "RESTARTS GAME";
+        hints[0] = "RESTARTS GAME";
+        hints[1] = "Y: DEV MENU";
     }
     for (int index = 0; index < 2; index++) {
         xo_text(hints[index], 460 - text_width(hints[index]), 448 + index * (text_height() + 2), normal);
@@ -567,11 +569,263 @@ static bool xo_open()
         }
     }
 
+    // The hint corner opens the dev menu (Y does too).
+    win_register_button(xo_win, 366, 440, XO_WIDTH - 366, 40, -1, -1, -1, XO_EVENT_DEV, NULL, NULL, NULL, 0);
+
     if (doneButton != -1) {
         warp_mouse_to_button(doneButton);
     }
 
     return true;
+}
+
+// --- Dev menu -------------------------------------------------------------
+//
+// Settings for trying things out, in a small window over XBOX OPTS built from
+// the same Preferences art: the title band, three copies of a two-position
+// knob panel, and the DONE plate. D-pad up/down picks, left/right (or A, or a
+// click) turns a knob, START or DONE applies, B / BACK cancels.
+
+#define XO_DEV_COUNT 3
+#define XO_DEV_PANEL_TOP 117 // the PAN CENTERS CURSOR panel in the background
+#define XO_DEV_PANEL_HEIGHT 78
+#define XO_DEV_WIDTH 196
+#define XO_DEV_HEIGHT (38 + XO_DEV_COUNT * XO_DEV_PANEL_HEIGHT + 40)
+#define XO_DEV_EVENT_ITEM 640
+#define XO_DEV_EVENT_DONE 650
+
+static const XboxOptsKnob xo_dev_knobs[XO_DEV_COUNT] = {
+    { "WALK STYLE", 2, { "HEX", "FREE" }, 0, 0 },
+    { "FREE WALK PACE", 2, { "GLIDE", "STRIDE" }, 0, 0 },
+    { "FREE WALK STOP", 2, { "SLIDE", "STEP" }, 0, 0 },
+};
+
+static int xo_dev_win = -1;
+static unsigned char* xo_dev_buf;
+static unsigned char* xo_dev_background;
+static int xo_dev_values[XO_DEV_COUNT];
+static int xo_dev_selected = 0;
+
+static int xo_dev_panel_y(int index)
+{
+    return 38 + index * XO_DEV_PANEL_HEIGHT;
+}
+
+static void xo_dev_text(const char* text, int x, int y, int color)
+{
+    text_to_buf(xo_dev_buf + XO_DEV_WIDTH * y + x, text, XO_DEV_WIDTH - x, XO_DEV_WIDTH, color);
+}
+
+static void xo_dev_draw()
+{
+    int normal = colorTable[18979];
+    int highlight = colorTable[32747];
+
+    memcpy(xo_dev_buf, xo_dev_background, XO_DEV_WIDTH * XO_DEV_HEIGHT);
+
+    text_font(104);
+    const char* title = "DEV MENU";
+    xo_dev_text(title, (XO_DEV_WIDTH - text_width(title)) / 2, 10, normal);
+
+    for (int index = 0; index < XO_DEV_COUNT; index++) {
+        const XboxOptsKnob* knob = &(xo_dev_knobs[index]);
+        int top = xo_dev_panel_y(index);
+        int color = index == xo_dev_selected ? highlight : normal;
+        int knobY = top + 32;
+
+        text_font(103);
+        xo_dev_text(knob->label, 99 - text_width(knob->label) / 2, top + 8, color);
+
+        text_font(101);
+        for (int value = 0; value < knob->valuesCount; value++) {
+            const char* text = knob->values[value];
+            int x = XO_KNOB_X + xo_knob_label_x[value];
+            if (value == 0) {
+                x -= text_width(text);
+            } else if (value == 1) {
+                x -= text_width(text) / 2;
+            }
+            xo_dev_text(text, x, knobY + xo_knob_label_y[value], xo_dev_values[index] == value ? color : normal);
+        }
+
+        trans_buf_to_buf(xo_frm_data[XO_FRM_KNOB] + XO_KNOB_WIDTH * XO_KNOB_HEIGHT * xo_dev_values[index],
+            XO_KNOB_WIDTH,
+            XO_KNOB_HEIGHT,
+            XO_KNOB_WIDTH,
+            xo_dev_buf + XO_DEV_WIDTH * knobY + XO_KNOB_X,
+            XO_DEV_WIDTH);
+    }
+
+    text_font(103);
+    xo_dev_text("DONE", 49 + 32, XO_DEV_HEIGHT - 31, normal);
+
+    win_draw(xo_dev_win);
+}
+
+// The hidden pointer on the selected knob, so A (a click there) turns it.
+static void xo_dev_park_pointer()
+{
+    Rect rect;
+    if (win_get_rect(xo_dev_win, &rect) == 0) {
+        mouse_set_position(rect.ulx + 99, rect.uly + xo_dev_panel_y(xo_dev_selected) + 40);
+    }
+}
+
+static void xo_dev_menu()
+{
+    xo_dev_background = (unsigned char*)mem_malloc(XO_DEV_WIDTH * XO_DEV_HEIGHT);
+    if (xo_dev_background == NULL) {
+        return;
+    }
+
+    // Title band, three knob panels, and a strip of plain texture with the
+    // DONE plate in the middle.
+    buf_to_buf(xo_background, XO_DEV_WIDTH, 38, XO_WIDTH, xo_dev_background, XO_DEV_WIDTH);
+    for (int index = 0; index < XO_DEV_COUNT; index++) {
+        buf_to_buf(xo_background + XO_WIDTH * XO_DEV_PANEL_TOP,
+            XO_DEV_WIDTH,
+            XO_DEV_PANEL_HEIGHT,
+            XO_WIDTH,
+            xo_dev_background + XO_DEV_WIDTH * xo_dev_panel_y(index),
+            XO_DEV_WIDTH);
+    }
+    unsigned char* strip = xo_dev_background + XO_DEV_WIDTH * (XO_DEV_HEIGHT - 40);
+    buf_to_buf(xo_background + XO_WIDTH * 440 + 366, 104, 40, XO_WIDTH, strip, XO_DEV_WIDTH);
+    buf_to_buf(xo_background + XO_WIDTH * 440 + 366, XO_DEV_WIDTH - 104, 40, XO_WIDTH, strip + 104, XO_DEV_WIDTH);
+    buf_to_buf(xo_background + XO_WIDTH * 440 + 137, 98, 40, XO_WIDTH, strip + 49, XO_DEV_WIDTH);
+
+    xo_dev_win = win_add((screenGetWidth() - XO_DEV_WIDTH) / 2,
+        (screenGetHeight() - XO_DEV_HEIGHT) / 2,
+        XO_DEV_WIDTH,
+        XO_DEV_HEIGHT,
+        256,
+        WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
+    if (xo_dev_win == -1) {
+        mem_free(xo_dev_background);
+        xo_dev_background = NULL;
+        return;
+    }
+#ifdef NXDK
+    padnav_set_window_flags(xo_dev_win, WINDOW_PAD_SELF_NAV);
+    padnav_set_back_key(xo_dev_win, SDL_SCANCODE_F11);
+#endif
+    xo_dev_buf = win_get_buf(xo_dev_win);
+
+    for (int index = 0; index < XO_DEV_COUNT; index++) {
+        win_register_button(xo_dev_win, 8, xo_dev_panel_y(index) + 4, 182, 72, -1, -1, -1, XO_DEV_EVENT_ITEM + index, NULL, NULL, NULL, 0);
+    }
+    int doneButton = win_register_button(xo_dev_win,
+        49 + 11,
+        XO_DEV_HEIGHT - 30,
+        xo_frm_size[XO_FRM_RED_UP].width,
+        xo_frm_size[XO_FRM_RED_UP].height,
+        -1,
+        -1,
+        -1,
+        XO_DEV_EVENT_DONE,
+        xo_frm_data[XO_FRM_RED_UP],
+        xo_frm_data[XO_FRM_RED_DOWN],
+        NULL,
+        BUTTON_FLAG_TRANSPARENT);
+    if (doneButton != -1) {
+        win_register_button_sound_func(doneButton, gsound_red_butt_press, gsound_red_butt_release);
+    }
+
+    xo_dev_values[0] = stick_walk_free_style() ? 1 : 0;
+    xo_dev_values[1] = stick_walk_dev_pace();
+    xo_dev_values[2] = stick_walk_dev_stop();
+    xo_dev_selected = 0;
+    xo_dev_draw();
+    xo_dev_park_pointer();
+
+#ifdef NXDK
+    // Without the pointer (pad mode) A and B are read here: walk mode would
+    // take a hidden-pointer A as "use the highlighted object".
+    GamepadSetScreenCapture(true);
+    int aPresses = GamepadButtonPresses(SDL_GAMEPAD_BUTTON_SOUTH);
+    int bPresses = GamepadButtonPresses(SDL_GAMEPAD_BUTTON_EAST);
+#endif
+
+    bool done = false;
+    bool save = false;
+    while (!done) {
+        sharedFpsLimiter.mark();
+
+        int keyCode = get_input();
+        bool redraw = true;
+#ifdef NXDK
+        if (GamepadButtonPresses(SDL_GAMEPAD_BUTTON_SOUTH) != aPresses) {
+            aPresses = GamepadButtonPresses(SDL_GAMEPAD_BUTTON_SOUTH);
+            if (GamepadScreenCaptureActive()) {
+                keyCode = XO_DEV_EVENT_ITEM + xo_dev_selected;
+            }
+        }
+        if (GamepadButtonPresses(SDL_GAMEPAD_BUTTON_EAST) != bPresses) {
+            bPresses = GamepadButtonPresses(SDL_GAMEPAD_BUTTON_EAST);
+            if (GamepadScreenCaptureActive()) {
+                keyCode = KEY_F11;
+            }
+        }
+#endif
+        switch (keyCode) {
+        case KEY_ARROW_UP:
+            xo_dev_selected = (xo_dev_selected + XO_DEV_COUNT - 1) % XO_DEV_COUNT;
+            xo_dev_park_pointer();
+            break;
+        case KEY_ARROW_DOWN:
+            xo_dev_selected = (xo_dev_selected + 1) % XO_DEV_COUNT;
+            xo_dev_park_pointer();
+            break;
+        case KEY_ARROW_LEFT:
+        case KEY_ARROW_RIGHT:
+            xo_dev_values[xo_dev_selected] = keyCode == KEY_ARROW_RIGHT ? 1 : 0;
+            gsound_play_sfx_file("ib1p1xx1");
+            break;
+        case KEY_ESCAPE: // START
+            gsound_play_sfx_file("ib1p1xx1");
+            // FALLTHROUGH
+        case XO_DEV_EVENT_DONE:
+            save = true;
+            done = true;
+            break;
+        case KEY_F11: // BACK, B
+            done = true;
+            break;
+        default:
+            if (keyCode >= XO_DEV_EVENT_ITEM && keyCode < XO_DEV_EVENT_ITEM + XO_DEV_COUNT) {
+                int index = keyCode - XO_DEV_EVENT_ITEM;
+                xo_dev_selected = index;
+                xo_dev_values[index] = 1 - xo_dev_values[index];
+                gsound_play_sfx_file("ib1p1xx1");
+            } else {
+                redraw = false;
+            }
+            break;
+        }
+
+        if (redraw && !done) {
+            xo_dev_draw();
+        }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
+    }
+
+#ifdef NXDK
+    GamepadSetScreenCapture(false);
+#endif
+
+    if (save) {
+        stick_walk_set_free_style_nosave(xo_dev_values[0] != 0);
+        stick_walk_set_dev(xo_dev_values[1], xo_dev_values[2]);
+        gconfig_save();
+    }
+
+    win_delete(xo_dev_win);
+    xo_dev_win = -1;
+    xo_dev_buf = NULL;
+    mem_free(xo_dev_background);
+    xo_dev_background = NULL;
 }
 
 static void xo_close()
@@ -647,6 +901,12 @@ void xbox_options_menu()
         case KEY_F11:
         case XO_EVENT_CANCEL:
             done = true;
+            break;
+        // Y sends B.
+        case KEY_LOWERCASE_B:
+        case KEY_UPPERCASE_B:
+        case XO_EVENT_DEV:
+            xo_dev_menu();
             break;
         default:
             if (keyCode >= XO_EVENT_ITEM && keyCode < XO_EVENT_ITEM + XO_ITEM_COUNT) {
