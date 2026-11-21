@@ -34,7 +34,8 @@ NXDK and the hardware-accelerated nxdk-sdl3 port. The current work branch is `SD
     or rebase `master-nxaudio-fallout` onto it.
   - **Dev branch `xgu-paletted-textures`** (off `master-nxaudio-fallout`, currently checked out) adds
     INDEX8 texture support with GPU palette lookup to the xgu renderer, and replaces pbkit's
-    `pb_finished()` flip queue with a driver-owned double buffer. The game's Xbox renderer depends
+    `pb_finished()` flip queue with a driver-owned double buffer. It also has (uncommitted) the
+    1080i mode in `SDL_xboxvideo.c` (see Video mode). The game's Xbox renderer depends
     on it. Merge it into `master-nxaudio-fallout` once it's verified.
   - After any pull, also run `git submodule update --init --recursive`, or SDL stays on the old
     version. Then re-run `nxdk-cmake` in `build/`.
@@ -702,13 +703,14 @@ inventory while the left stick moved the pointer.
   reachability check against a real wall.
 
 **Display scaling and safe area** (`svgaComputeLayout`, svga.cc). The window is the video mode
-(480p/720p); the game draws at a smaller "game size" that every window, the mouse and `scr_size`
+(480p/720p/1080i); the game draws at a smaller "game size" that every window, the mouse and `scr_size`
 use, and `renderPresent` draws the texture into `gPresentRect` (centered) instead of full screen
 (SDL logical presentation is off on NXDK). Area = mode minus SAFE_AREA% per edge; game size =
-area / UI scale (1, 1.33, 1.5), at least 640x480, width a multiple of 8. At 480p the game can't go
-below 640x480, so a safe area scales the image down. Texture filtering is NEAREST at exactly 1:1,
-LINEAR otherwise (works on the INDEX8 texture in XEMU; untested on hardware). E.g. 720p 1.5x with
-4% safe area = 848x480 scaled 1.37x. The log line `svga_init: mode ..., game ..., scale ...` shows
+area / UI scale (UI_SCALE 0-3: 1, 1.33, 1.5, 2), at least 640x480, width a multiple of 8. A
+1920-wide mode always uses 2x (UI_SCALE 3). At 480p the game can't go below 640x480, so a safe area scales the image
+down. Texture filtering is NEAREST at exactly 1:1 or 2:1 (snapped within 1%), LINEAR otherwise
+(works on the INDEX8 texture in XEMU; untested on hardware). E.g. 720p 1.5x with 4% safe area =
+848x480 scaled 1.37x (1.5x is no longer on the DISPLAY knob; an old UI_SCALE 2 still works). The log line `svga_init: mode ..., game ..., scale ...` shows
 the result. Pointer speed needs no change: its sqrt(area) scaling keeps screen-crossing time the
 same at every game size.
 
@@ -718,8 +720,24 @@ same at every game size.
 - `svga_init` creates the SDL window at that size **without `SDL_WINDOW_FULLSCREEN`**. With that
   flag, SDL3 swaps in the display bounds, and the nxdk driver's primary display is 640×480, so 720p
   silently becomes 480p.
-- The nxdk-sdl3 driver (`nxdk_glue/video/SDL_xboxvideo.c`) maps requests below 1280×720 to 480p and
-  anything else to 720p. It never sets 1080i, although nxdk lists 1920×1080.
+- The nxdk-sdl3 driver (`nxdk_glue/video/SDL_xboxvideo.c`, local change on `xgu-paletted-textures`)
+  maps requests below 1280×720 to 480p, below 1920×1080 to 720p, and 1920×1080 to **1080i**, which
+  nxdk only sets when the console's video settings allow 1080i on an HDTV pack. Any HD mode the
+  console refuses falls back straight to 640x480 (user request: 480p is always the fallback;
+  nxdk makes it 480p or 480i to suit the cable), and `game_init` (game.cc, after `initWindow`) then writes 640x480 /
+  UI_SCALE 0 back to `f1_res.ini` (`svga_mode_width()`), so XBOX OPTS shows what's in use and
+  the next boot doesn't retry. Verified with a temporarily forced 1080i failure. **1080i uses 16-bit colour** (R5G6B5, the renderer picks the pbkit
+  format from the mode's bpp): pbkit allocates three colour buffers plus a 32-bit depth buffer at
+  the mode's size, and at 32-bit colour (~33 MB) the game's art cache then failed to allocate
+  ("cache_init failed in art_init" -> game_init failed -> relaunch loop; XEMU's game sees 64 MB).
+  The palette is 6 bits per channel, so 16-bit output loses only one bit of red and blue.
+- DISPLAY knob (XBOX OPTS): 480P, 720P, 720P 1.33X, **1080I 2X** (user choice: it replaced 720P
+  1.5X; a refused HD mode resets it to 480P; `SCR_WIDTH/HEIGHT` 1920/1080, `UI_SCALE` 3). `svga_init` logs free memory after the
+  renderer (`MmQueryStatistics`): 480p 51,184 KB of 65,536; 1080i (16-bit) 28,856 KB. Verified in
+  XEMU at 1080i: intro movie, main menu and in-game map at 60 fps (panning included). Not tested:
+  real hardware (picture, interlacing, memory over a long session). If memory runs short there,
+  the next step is a pbkit option to skip its third colour buffer and the depth buffer (~12 MB
+  more at 1080i).
 - The screen texture is **8-bit paletted** (`SDL_PIXELFORMAT_INDEX8`, NV2A `SZ_I8_A8R8G8B8`), sharing
   `gSdlSurface`'s palette, so the GPU does the palette lookup and palette changes (color cycling
   every 33 ms in-game, fades) cost no CPU. `GNW95_ShowRect` copies into `gSdlSurface` and grows a

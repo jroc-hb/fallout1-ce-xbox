@@ -36,12 +36,18 @@ static SDL_FRect gPresentRect;
 static float svgaComputeLayout(int modeWidth, int modeHeight, int uiScale, int safeArea, int* width, int* height)
 {
     safeArea = std::clamp(safeArea, 0, 8);
-    uiScale = std::clamp(uiScale, 0, 2);
+    uiScale = std::clamp(uiScale, 0, 3);
+    if (modeWidth >= 1920) {
+        // 1080i: always 2x (a 960x540 game, every pixel a 2x2 block).
+        uiScale = 3;
+    } else if (uiScale == 3) {
+        uiScale = 1;
+    }
     if (modeWidth < 1280) {
         uiScale = 0;
     }
 
-    static const float scales[3] = { 1.0f, 4.0f / 3.0f, 1.5f };
+    static const float scales[4] = { 1.0f, 4.0f / 3.0f, 1.5f, 2.0f };
     float areaWidth = (float)modeWidth * (100 - 2 * safeArea) / 100.0f;
     float areaHeight = (float)modeHeight * (100 - 2 * safeArea) / 100.0f;
 
@@ -62,9 +68,12 @@ static float svgaComputeLayout(int modeWidth, int modeHeight, int uiScale, int s
     *height = std::max(480, ((int)gameHeight) & ~1);
 
     float scale = std::min(areaWidth / *width, areaHeight / *height);
-    // Snap to exactly 1:1 when it's that close, so it stays pixel-sharp.
+    // Snap to exactly 1:1 or 2:1 when it's that close, so it stays
+    // pixel-sharp.
     if (std::fabs(scale - 1.0f) < 0.01f) {
         scale = 1.0f;
+    } else if (std::fabs(scale - 2.0f) < 0.02f) {
+        scale = 2.0f;
     }
 
     gPresentRect.w = (float)(int)(*width * scale + 0.5f);
@@ -72,6 +81,14 @@ static float svgaComputeLayout(int modeWidth, int modeHeight, int uiScale, int s
     gPresentRect.x = (float)(int)((modeWidth - gPresentRect.w) / 2);
     gPresentRect.y = (float)(int)((modeHeight - gPresentRect.h) / 2);
     return scale;
+}
+
+// The video mode actually set (the console may refuse an HD one).
+static int svga_mode_width_value = 0;
+
+int svga_mode_width()
+{
+    return svga_mode_width_value;
 }
 
 // Bounding box of gSdlSurface changed since the last upload to gSdlTexture.
@@ -242,8 +259,8 @@ bool svga_init(VideoOptions* video_options)
     // window's requested size with the display bounds, and the nxdk driver's
     // primary display is 640x480, so the f1_res.ini resolution would never
     // reach it. The driver makes the window fullscreen on its own and sets the
-    // video mode from the size requested here (640x480 -> 480p, 1280x720 or
-    // larger -> 720p).
+    // video mode from the size requested here (640x480 -> 480p, 1280x720 ->
+    // 720p, 1920x1080 -> 1080i if the console allows it, else 720p).
     SDL_WindowFlags windowFlags = 0;
 #else
     SDL_WindowFlags windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIGH_PIXEL_DENSITY;
@@ -278,6 +295,7 @@ bool svga_init(VideoOptions* video_options)
 
     int modeWidth = video_options->width;
     int modeHeight = video_options->height;
+    svga_mode_width_value = modeWidth;
     float presentScale = svgaComputeLayout(modeWidth, modeHeight, video_options->uiScale, video_options->safeArea,
         &(video_options->width), &(video_options->height));
     DbgPrint("svga_init: mode %dx%d, game %dx%d, scale %d/100, at %d,%d\n", modeWidth, modeHeight,
@@ -290,6 +308,18 @@ bool svga_init(VideoOptions* video_options)
         gSdlWindow = NULL;
         return false;
     }
+
+#ifdef NXDK
+    {
+        // What the video mode left for the game (1080i's buffers are big).
+        MM_STATISTICS stats;
+        stats.Length = sizeof(stats);
+        if (NT_SUCCESS(MmQueryStatistics(&stats))) {
+            DbgPrint("svga_init: %lu of %lu KB free after the renderer\n",
+                stats.AvailablePages * 4, stats.TotalPhysicalPages * 4);
+        }
+    }
+#endif
 
     gSdlSurface = SDL_CreateSurface(video_options->width, video_options->height, SDL_PIXELFORMAT_INDEX8);
     if (gSdlSurface == NULL) {
@@ -411,8 +441,9 @@ static bool createRenderer(int width, int height)
 #ifdef NXDK
     // Sharp pixels at 1:1; smooth them when the image is scaled by a
     // non-whole amount, where nearest would make uneven pixels.
+    // Nearest at a whole-number scale (1:1, 1080i's 2:1), linear otherwise.
     SDL_SetTextureScaleMode(gSdlTexture,
-        gPresentRect.w == (float)width ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR);
+        gPresentRect.w == (float)width || gPresentRect.w == (float)(width * 2) ? SDL_SCALEMODE_NEAREST : SDL_SCALEMODE_LINEAR);
 #else
     SDL_SetTextureScaleMode(gSdlTexture, SDL_SCALEMODE_NEAREST);
 #endif

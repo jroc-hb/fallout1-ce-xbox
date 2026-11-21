@@ -35,6 +35,11 @@ void renderPresent();
 void svgaMarkDirty(const SDL_Rect* rect);
 #endif
 
+#ifdef NXDK
+// Width of the video mode actually set (640, 1280 or 1920), 0 before svga_init.
+int svga_mode_width();
+#endif
+
 } // namespace fallout
 
 #endif /* FALLOUT_PLIB_GNW_SVGA_H_ */

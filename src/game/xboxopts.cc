@@ -113,7 +113,8 @@ typedef enum XboxOptsItem {
 
 // DISPLAY knob positions: f1_res.ini video mode plus [XBOX] UI_SCALE.
 #define XO_DISPLAY_480P 0
-#define XO_DISPLAY_720P 1 // UI_SCALE 0..2 -> 1..3
+#define XO_DISPLAY_720P 1 // UI_SCALE 0..1 -> 1..2
+#define XO_DISPLAY_1080I 3 // 1920x1080, UI_SCALE 3 (2x); 720p 1.33x if not allowed
 
 // Button event codes.
 #define XO_EVENT_DONE 504
@@ -141,7 +142,7 @@ typedef struct XboxOptsSlider {
 
 // The Preferences screen's knob rows (options.cc row1Ytab / btndat).
 static const XboxOptsKnob xo_knobs[XO_KNOB_COUNT] = {
-    { "DISPLAY", 4, { "480P", "720P", "720P 1.33X", "720P 1.5X" }, 48, 71 },
+    { "DISPLAY", 4, { "480P", "720P", "720P 1.33X", "1080I 2X" }, 48, 71 },
     { "PAN CENTERS CURSOR", 2, { "OFF", "ON" }, 125, 149 },
     // +RUMBLE: assist plus a tick when the pointer reaches something.
     { "POINTER ASSIST", 3, { "OFF", "ON", "+RUMBLE" }, 203, 226 },
@@ -398,11 +399,15 @@ static void xo_load_values()
             int width;
             int height;
             if (config_get_value(&resolutionConfig, "MAIN", "SCR_WIDTH", &width)
-                && config_get_value(&resolutionConfig, "MAIN", "SCR_HEIGHT", &height)
-                && width == 1280 && height == 720) {
-                int uiScale = 0;
-                config_get_value(&resolutionConfig, "XBOX", "UI_SCALE", &uiScale);
-                xo_values[XO_ITEM_DISPLAY] = XO_DISPLAY_720P + std::clamp(uiScale, 0, 2);
+                && config_get_value(&resolutionConfig, "MAIN", "SCR_HEIGHT", &height)) {
+                if (width >= 1920 && height >= 1080) {
+                    xo_values[XO_ITEM_DISPLAY] = XO_DISPLAY_1080I;
+                } else if (width == 1280 && height == 720) {
+                    // The old 720P 1.5X (UI_SCALE 2) shows as 1.33X.
+                    int uiScale = 0;
+                    config_get_value(&resolutionConfig, "XBOX", "UI_SCALE", &uiScale);
+                    xo_values[XO_ITEM_DISPLAY] = XO_DISPLAY_720P + std::clamp(uiScale, 0, 1);
+                }
             }
             config_get_value(&resolutionConfig, "XBOX", "SAFE_AREA", &(xo_values[XO_ITEM_SAFE_AREA]));
         }
@@ -479,10 +484,22 @@ static bool xo_save_values(int initialDisplay, int initialSafeArea)
     Config resolutionConfig;
     if (config_init(&resolutionConfig)) {
         config_load(&resolutionConfig, xo_res_path, false);
-        bool hd = xo_values[XO_ITEM_DISPLAY] >= XO_DISPLAY_720P;
-        config_set_value(&resolutionConfig, "MAIN", "SCR_WIDTH", hd ? 1280 : 640);
-        config_set_value(&resolutionConfig, "MAIN", "SCR_HEIGHT", hd ? 720 : 480);
-        config_set_value(&resolutionConfig, "XBOX", "UI_SCALE", hd ? xo_values[XO_ITEM_DISPLAY] - XO_DISPLAY_720P : 0);
+        int display = xo_values[XO_ITEM_DISPLAY];
+        int width = 640;
+        int height = 480;
+        int uiScale = 0;
+        if (display == XO_DISPLAY_1080I) {
+            width = 1920;
+            height = 1080;
+            uiScale = 3;
+        } else if (display >= XO_DISPLAY_720P) {
+            width = 1280;
+            height = 720;
+            uiScale = display - XO_DISPLAY_720P;
+        }
+        config_set_value(&resolutionConfig, "MAIN", "SCR_WIDTH", width);
+        config_set_value(&resolutionConfig, "MAIN", "SCR_HEIGHT", height);
+        config_set_value(&resolutionConfig, "XBOX", "UI_SCALE", uiScale);
         config_set_value(&resolutionConfig, "XBOX", "SAFE_AREA", xo_values[XO_ITEM_SAFE_AREA]);
         config_save(&resolutionConfig, xo_res_path, false);
         config_exit(&resolutionConfig);

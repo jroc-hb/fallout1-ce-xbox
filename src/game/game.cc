@@ -211,7 +211,27 @@ int game_init(const char* windowTitle, bool isMapper, int font, int flags, int a
         config_exit(&resolutionConfig);
     }
 
+#ifdef NXDK
+    const int requestedWidth = video_options.width;
+#endif
     initWindow(&video_options, flags);
+#ifdef NXDK
+    // An HD mode the console didn't allow (video settings, AV pack) fell back
+    // to 480p (480i on SD cables): save that, so XBOX OPTS shows what's in
+    // use and the next boot doesn't try again.
+    if (requestedWidth > 640 && svga_mode_width() == 640) {
+        debug_printf("Display: %d-wide mode not available, reset to 480p\n", requestedWidth);
+        Config resetConfig;
+        if (config_init(&resetConfig)) {
+            config_load(&resetConfig, "E:\\UDATA\\FALLOUT1\\f1_res.ini", false);
+            config_set_value(&resetConfig, "MAIN", "SCR_WIDTH", 640);
+            config_set_value(&resetConfig, "MAIN", "SCR_HEIGHT", 480);
+            config_set_value(&resetConfig, "XBOX", "UI_SCALE", 0);
+            config_save(&resetConfig, "E:\\UDATA\\FALLOUT1\\f1_res.ini", false);
+            config_exit(&resetConfig);
+        }
+    }
+#endif
     palette_init();
 
     if (!game_in_mapper) {
