@@ -1177,6 +1177,11 @@ int world_map(WorldMapContext ctx)
             input = get_input();
 
 #ifdef NXDK
+            if (GamepadTakeDisconnectPause()) {
+                PauseWindow(true);
+                input = -1;
+            }
+
             // The pointer stick brought the pointer back (pad mode off): start
             // it on the player's marker, where travel starts, instead of the
             // town list button it was parked on.

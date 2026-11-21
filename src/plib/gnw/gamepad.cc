@@ -145,35 +145,47 @@ static bool gDpadDown  = false;
 static bool gDpadLeft  = false;
 static bool gDpadRight = false;
 
-// The scancode currently held via the left-trigger + d-pad chord
-// (SDL_SCANCODE_UNKNOWN if none).
-static SDL_Scancode gLeftTriggerChordKey = SDL_SCANCODE_UNKNOWN;
-
-// Minimum left-trigger value to activate the d-pad chord mapping.
+// LT + d-pad up/down scroll the message log (it goes back to the newest
+// message when LT is let go). They used to send the skill hotkeys 1-8, which
+// the skill wheel does now.
 static constexpr float kChordTriggerThreshold = 0.5f;
+static int gLogScrollDir = 0; // -1 up, 1 down, while held
+static Uint64 gLogScrollNext = 0;
+static bool gLogScrolled = false;
+static constexpr Uint64 kLogScrollDelayMs = 350;
+static constexpr Uint64 kLogScrollRepeatMs = 90;
 
-// Maps the current d-pad held state to a digit scancode (1-8, clockwise from Up),
-// or SDL_SCANCODE_UNKNOWN if no recognised direction is active.
-SDL_Scancode GetDpadChordScancode()
+static void LogScroll(int dir)
 {
-    if ( gDpadUp   && !gDpadDown && !gDpadLeft && !gDpadRight) return SDL_SCANCODE_1;
-    if ( gDpadUp   && !gDpadDown && !gDpadLeft &&  gDpadRight) return SDL_SCANCODE_2;
-    if (!gDpadUp   && !gDpadDown && !gDpadLeft &&  gDpadRight) return SDL_SCANCODE_3;
-    if (!gDpadUp   &&  gDpadDown && !gDpadLeft &&  gDpadRight) return SDL_SCANCODE_4;
-    if (!gDpadUp   &&  gDpadDown && !gDpadLeft && !gDpadRight) return SDL_SCANCODE_5;
-    if (!gDpadUp   &&  gDpadDown &&  gDpadLeft && !gDpadRight) return SDL_SCANCODE_6;
-    if (!gDpadUp   && !gDpadDown &&  gDpadLeft && !gDpadRight) return SDL_SCANCODE_7;
-    if ( gDpadUp   && !gDpadDown &&  gDpadLeft && !gDpadRight) return SDL_SCANCODE_8;
-    return SDL_SCANCODE_UNKNOWN;
+    if (dir < 0) {
+        display_scroll_up(-1, -1);
+    } else {
+        display_scroll_down(-1, -1);
+    }
+    gLogScrolled = true;
 }
 
-// Releases the currently held chord key, if any.
-void ReleaseChordKey()
+static void LogScrollPress(int dir)
 {
-    if (gLeftTriggerChordKey != SDL_SCANCODE_UNKNOWN) {
-        KeyboardData key = {gLeftTriggerChordKey, 0};
-        GNW95_process_key(&key);
-        gLeftTriggerChordKey = SDL_SCANCODE_UNKNOWN;
+    gLogScrollDir = dir;
+    gLogScrollNext = SDL_GetTicks() + kLogScrollDelayMs;
+    LogScroll(dir);
+}
+
+// Held: repeat. LT let go: back to the newest message.
+static void LogScrollUpdate()
+{
+    if (gLeftTriggerValue < kChordTriggerThreshold) {
+        gLogScrollDir = 0;
+        if (gLogScrolled) {
+            gLogScrolled = false;
+            display_scroll_to_latest();
+        }
+        return;
+    }
+    if (gLogScrollDir != 0 && SDL_GetTicks() >= gLogScrollNext) {
+        gLogScrollNext = SDL_GetTicks() + kLogScrollRepeatMs;
+        LogScroll(gLogScrollDir);
     }
 }
 
@@ -246,8 +258,18 @@ static bool SticksSwapped()
     return gSwapSticks || gStickWalk;
 }
 
+// The pad that last sent input (a button, or a stick/trigger pushed well
+// past its rest). Unplugging it pauses the game; unplugging an idle one
+// (XEMU shows extra pads) doesn't.
+static SDL_JoystickID gActivePad = 0;
+static bool gDisconnectPause = false;
+
 void HandleControllerAxisMotion(const SDL_Event& event)
 {
+    if (event.gaxis.value > 12000 || event.gaxis.value < -12000) {
+        gActivePad = event.gaxis.which;
+    }
+
     int axis = event.gaxis.axis;
     if (SticksSwapped()) {
         switch (axis) {
@@ -282,18 +304,14 @@ void HandleControllerAxisMotion(const SDL_Event& event)
     // Left trigger: analog mouse speed modifier.
     // Full press -> 25% speed, half press -> 62.5% speed, etc.
     // Speed multiplier = 1.0 - triggerValue * 0.75 (applied in ProcessLeftStick).
-    // Also gates the d-pad chord mapping when >= kChordTriggerThreshold.
+    // Also makes d-pad up/down scroll the message log (>= kChordTriggerThreshold).
     case SDL_GAMEPAD_AXIS_LEFT_TRIGGER:
         {
             const float prev = gLeftTriggerValue;
             gLeftTriggerValue = std::max(0.0f, std::min(1.0f,
                 static_cast<float>(event.gaxis.value) / 32767.0f));
 
-            // If the trigger drops below the chord threshold, release any held
-            // chord key so it doesn't get stuck.
-            if (prev >= kChordTriggerThreshold && gLeftTriggerValue < kChordTriggerThreshold) {
-                ReleaseChordKey();
-            }
+            (void)prev;
         }
         break;
 
@@ -488,42 +506,30 @@ void HandleControllerButtonUp(const SDL_Event& event)
     // or send the normal arrow key release.
     case SDL_GAMEPAD_BUTTON_DPAD_UP:
         gDpadUp = false;
-        if (gLeftTriggerValue >= kChordTriggerThreshold) {
-            ReleaseChordKey();
-        } else {
-            simulatedKeyboardKey = {SDL_SCANCODE_UP, 0};
-            GNW95_process_key(&simulatedKeyboardKey);
-        }
+        gLogScrollDir = 0;
+        simulatedKeyboardKey = {SDL_SCANCODE_UP, 0};
+        GNW95_process_key(&simulatedKeyboardKey);
         break;
 
     case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
         gDpadDown = false;
-        if (gLeftTriggerValue >= kChordTriggerThreshold) {
-            ReleaseChordKey();
-        } else {
-            simulatedKeyboardKey = {SDL_SCANCODE_DOWN, 0};
-            GNW95_process_key(&simulatedKeyboardKey);
-        }
+        gLogScrollDir = 0;
+        simulatedKeyboardKey = {SDL_SCANCODE_DOWN, 0};
+        GNW95_process_key(&simulatedKeyboardKey);
         break;
 
     case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
         gDpadLeft = false;
-        if (gLeftTriggerValue >= kChordTriggerThreshold) {
-            ReleaseChordKey();
-        } else {
-            simulatedKeyboardKey = {SDL_SCANCODE_LEFT, 0};
-            GNW95_process_key(&simulatedKeyboardKey);
-        }
+        gLogScrollDir = 0;
+        simulatedKeyboardKey = {SDL_SCANCODE_LEFT, 0};
+        GNW95_process_key(&simulatedKeyboardKey);
         break;
 
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
         gDpadRight = false;
-        if (gLeftTriggerValue >= kChordTriggerThreshold) {
-            ReleaseChordKey();
-        } else {
-            simulatedKeyboardKey = {SDL_SCANCODE_RIGHT, 0};
-            GNW95_process_key(&simulatedKeyboardKey);
-        }
+        gLogScrollDir = 0;
+        simulatedKeyboardKey = {SDL_SCANCODE_RIGHT, 0};
+        GNW95_process_key(&simulatedKeyboardKey);
         break;
 
     default:
@@ -539,6 +545,7 @@ void HandleControllerButtonUp(const SDL_Event& event)
 void HandleControllerButtonDown(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
+    gActivePad = event.gbutton.which;
 
     int button = event.gbutton.button;
     if (button >= 0 && button < SDL_GAMEPAD_BUTTON_COUNT) {
@@ -631,25 +638,12 @@ void HandleControllerButtonDown(const SDL_Event& event)
         gWhiteDownTicks = SDL_GetTicks();
         break;
 
-    // D-pad: update held state, then either fire the chord digit key (trigger held)
-    // or send the normal arrow key.
-    //
-    // Chord mapping (left trigger + d-pad, clockwise from Up):
-    //   Up=1  Up+Right=2  Right=3  Down+Right=4
-    //   Down=5  Down+Left=6  Left=7  Up+Left=8
-    //
-    // For diagonals the second button pressed resolves the final chord key.
-    // The previous chord key is always released before the new one fires so
-    // the game never sees two digit keys down at once.
+    // D-pad: the arrow keys (menus: padnav's focus). With LT held, up/down
+    // scroll the message log (LogScrollPress).
     case SDL_GAMEPAD_BUTTON_DPAD_UP:
         gDpadUp = true;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
-            ReleaseChordKey();
-            gLeftTriggerChordKey = GetDpadChordScancode();
-            if (gLeftTriggerChordKey != SDL_SCANCODE_UNKNOWN) {
-                simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
-                GNW95_process_key(&simulatedKeyboardKey);
-            }
+            LogScrollPress(-1);
         } else if (!padnav_dpad(0, -1)) {
             // Menus: padnav moved the focus; otherwise the arrow key.
             simulatedKeyboardKey = {SDL_SCANCODE_UP, 1};
@@ -660,12 +654,7 @@ void HandleControllerButtonDown(const SDL_Event& event)
     case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
         gDpadDown = true;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
-            ReleaseChordKey();
-            gLeftTriggerChordKey = GetDpadChordScancode();
-            if (gLeftTriggerChordKey != SDL_SCANCODE_UNKNOWN) {
-                simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
-                GNW95_process_key(&simulatedKeyboardKey);
-            }
+            LogScrollPress(1);
         } else if (!padnav_dpad(0, 1)) {
             // Menus: padnav moved the focus; otherwise the arrow key.
             simulatedKeyboardKey = {SDL_SCANCODE_DOWN, 1};
@@ -676,12 +665,7 @@ void HandleControllerButtonDown(const SDL_Event& event)
     case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
         gDpadLeft = true;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
-            ReleaseChordKey();
-            gLeftTriggerChordKey = GetDpadChordScancode();
-            if (gLeftTriggerChordKey != SDL_SCANCODE_UNKNOWN) {
-                simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
-                GNW95_process_key(&simulatedKeyboardKey);
-            }
+            // LT + left/right: nothing.
         } else if (!padnav_dpad(-1, 0)) {
             // Menus: padnav moved the focus; otherwise the arrow key.
             simulatedKeyboardKey = {SDL_SCANCODE_LEFT, 1};
@@ -692,12 +676,7 @@ void HandleControllerButtonDown(const SDL_Event& event)
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
         gDpadRight = true;
         if (gLeftTriggerValue >= kChordTriggerThreshold) {
-            ReleaseChordKey();
-            gLeftTriggerChordKey = GetDpadChordScancode();
-            if (gLeftTriggerChordKey != SDL_SCANCODE_UNKNOWN) {
-                simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
-                GNW95_process_key(&simulatedKeyboardKey);
-            }
+            // LT + left/right: nothing.
         } else if (!padnav_dpad(1, 0)) {
             // Menus: padnav moved the focus; otherwise the arrow key.
             simulatedKeyboardKey = {SDL_SCANCODE_RIGHT, 1};
@@ -1090,6 +1069,7 @@ bool GamepadClickHeld()
 void ProcessTriggers()
 {
     ProcessHeldButtons();
+    LogScrollUpdate();
 
     // LT held: outline everything usable on screen, and show which pad
     // button does what on the HUD.
@@ -1280,6 +1260,46 @@ void HandleControllerDeviceRemoved(const SDL_Event& event)
         debug_printf("Removed game controller for joystick %u\n", (unsigned int)event.gdevice.which);
         SDL_CloseGamepad(controller);
     }
+
+    if (event.gdevice.which != gActivePad || gActivePad == 0) {
+        return;
+    }
+    gActivePad = 0;
+
+    // Whatever it was holding is let go: a stick left pushed would walk on,
+    // a held trigger would keep clicking.
+    leftStickXUnscaled = leftStickYUnscaled = rightStickXUnscaled = rightStickYUnscaled = 0.0f;
+    ScaleLeftJoystick();
+    ScaleRightJoystick();
+    gLeftTriggerValue = 0.0f;
+    gRightTriggerValue = 0.0f;
+    gAButtonHeld = false;
+    gGamepadLeftClick = 0;
+    gGamepadRightClick = 0;
+    gBackDown = false;
+    gXCombat = false;
+    gWhiteDown = false;
+    gLogScrollDir = 0;
+    for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT; button++) {
+        gButtonHeld[button] = false;
+        gButtonCaptured[button] = false;
+    }
+    const SDL_Scancode arrows[4] = { SDL_SCANCODE_UP, SDL_SCANCODE_DOWN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT };
+    for (int index = 0; index < 4; index++) {
+        KeyboardData key = { arrows[index], 0 };
+        GNW95_process_key(&key);
+    }
+    gDpadUp = gDpadDown = gDpadLeft = gDpadRight = false;
+
+    gDisconnectPause = true;
+    debug_printf("Gamepad: the active controller was unplugged, pausing\n");
+}
+
+bool GamepadTakeDisconnectPause()
+{
+    const bool pause = gDisconnectPause;
+    gDisconnectPause = false;
+    return pause;
 }
 
 } // namespace fallout

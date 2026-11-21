@@ -462,6 +462,13 @@ void game_exit()
 int game_handle_input(int eventCode, bool isInCombatMode)
 {
 #ifdef NXDK
+    // The controller was unplugged: the game's pause screen (any button,
+    // once it's back, carries on).
+    if (GamepadTakeDisconnectPause()) {
+        PauseWindow(false);
+        return 0;
+    }
+
     // A pressed with the pointer hidden by stick walking: act here, where
     // mouse clicks are handled.
     if (!isInCombatMode) {

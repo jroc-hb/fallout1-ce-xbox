@@ -46,7 +46,7 @@ the right stick and the left stick pans the camera.
 | **Black** | Change weapon mode | Change weapon mode | Change weapon mode (single, burst, aimed, reload) |
 | **White** | Start combat (aimed at the highlighted character) | Start combat | Tap: end turn. Hold: end combat |
 | **LT** (hold) | Outline everything usable on screen | Slow, precise pointer + outline everything usable | Slow, precise pointer + outline everything usable |
-| **LT + d-pad** | Skill shortcuts (below) | Skill shortcuts | Skill shortcuts |
+| **LT + d-pad up/down** | Scroll the message log back (let go of LT: back to the newest message) | Same | Same |
 | **D-pad** | Switch the highlight between nearby objects | Jump the pointer to the next object in that direction | Jump the pointer to the next character in that direction |
 | **Left stick click** | Switch to pointer mode | Switch to walk mode | Centre the camera on your character |
 | **Right stick click** | Skill wheel | Skill wheel | Skill wheel |
@@ -55,6 +55,9 @@ the right stick and the left stick pans the camera.
 
 "Tap" means a quick press. "Hold" means keeping the button down for a moment (under half a
 second).
+
+If the controller you're playing with is unplugged (or its batteries die), the game pauses
+on its **PAUSED** screen. Plug it back in (or pick up another one) and press any button.
 
 ## Walk mode in detail
 
@@ -105,9 +108,6 @@ The skill is used straight away on the highlighted object (walk mode) or on what
 pointer (pointer mode), for example "A: on Slummer". First Aid and Doctor fall back to
 yourself. Sneak just turns on or off. If there's nothing to use the skill on, you get the
 skill cursor to pick a target with the pointer.
-
-The **LT + d-pad** shortcuts use the same layout: hold LT and press the direction of the
-skill (for diagonals, press both directions).
 
 ### Menus wheel (Back)
 
@@ -175,8 +175,8 @@ Menus are played with the **d-pad**, without the pointer:
 
 With the pointer showing, **B** right-clicks. In conversations, **Y** opens Barter. In XBOX OPTS, the d-pad moves
 between settings and changes them, **Start** applies and **Back** or **B** cancels. **Y** opens
-the **Dev menu**: settings for comparing versions of features in development (for now, free
-walking's pace and stop). **Start** also backs
+the **Dev menu**: settings for comparing versions of features in development (free walking's
+pace and stop) and for testing (MOVIES: turn the cutscenes off). **Start** also backs
 out of the character selection screen.
 
 ## Inventory, looting and bartering

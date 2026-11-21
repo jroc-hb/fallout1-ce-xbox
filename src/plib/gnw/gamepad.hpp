@@ -59,6 +59,10 @@ void GamepadSetUiCapture(bool capture);
 // still move the pointer (which leaves pad mode, ending the capture).
 void GamepadSetScreenCapture(bool capture);
 
+// The controller in use was unplugged since the last call: the game should
+// pause (game.cc on the map, the world map loop). Clears it.
+bool GamepadTakeDisconnectPause();
+
 // A screen that scrolls its own view (the world map): while set, the camera
 // stick calls `proc` every frame it's deflected (x/y -1..1, positive y up;
 // dtMs since the last frame) instead of walking or panning the map. NULL ends it.

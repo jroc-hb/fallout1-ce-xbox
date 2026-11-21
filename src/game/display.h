@@ -11,6 +11,7 @@ void display_clear();
 void display_redraw();
 void display_scroll_up(int btn, int keyCode);
 void display_scroll_down(int btn, int keyCode);
+void display_scroll_to_latest();
 void display_arrow_up(int btn, int keyCode);
 void display_arrow_down(int btn, int keyCode);
 void display_arrow_restore(int btn, int keyCode);

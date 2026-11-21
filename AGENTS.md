@@ -134,7 +134,8 @@ cd /mnt/e/Xbox/Development/XEMU
 - Save data and the live `fallout.cfg`/`f1_res.ini` are on the emulated HDD at `E:\UDATA\FALLOUT1`
   (inside `xbox_hdd.qcow2`). After the first run, the copy in `fallout-ce/` only seeds a fresh HDD.
   The README says FMVs used to crash XEMU and the workaround was `[debug] disable_fmv=1`. The
-  current build boots with `disable_fmv=0`.
+  current build boots with `disable_fmv=0` and plays them in XEMU (intro verified 2026-11-21);
+  the Dev Menu's MOVIES knob sets it.
 
 ### Screenshots and input (helper scripts in `E:\Xbox\Development\XEMU\`)
 
@@ -234,7 +235,19 @@ applies, BACK (F11) or B (padnav back key F11) cancels; the mouse works on the k
     (`stick_walk_request_look` -> `gmouse_near_target_look`). **LT** held: precision pointer
     (the existing brake) and every usable object on screen outlined (`gmouse_show_all_update`,
     from `ProcessTriggers`; hands the outline over to the walk highlight / d-pad selection if
-    they're on the same object). LT + d-pad still sends 1-8 (skill hotkeys).
+    they're on the same object). LT + d-pad up/down scroll the message log (`LogScrollPress`,
+    `display_scroll_up/down`; held: repeat after 350 ms every 90 ms, `LogScrollUpdate` from
+    `ProcessTriggers`); letting go of LT returns it to the newest message
+    (`display_scroll_to_latest`, display.cc). LT + left/right do nothing. They used to send the
+    skill hotkeys 1-8, retired (the skill wheel does it). Verified in XEMU.
+  - **Controller unplugged**: `gActivePad` is the pad that last sent a button or a stick /
+    trigger past 12000 (XEMU shows idle extra pads; their removal is ignored). When it's removed,
+    `HandleControllerDeviceRemoved` lets go of everything it held (sticks, triggers, A, clicks,
+    held-button state, arrow keys) and sets a flag; `game_handle_input` (map) and the world map
+    loop take it with `GamepadTakeDisconnectPause` and show the game's own `PauseWindow` (any
+    key closes it). Unplugged in a menu, it pauses on return to the map. Verified in XEMU by
+    stopping the ViGEm pad server mid-walk: the walk stopped, PAUSED shown, a reconnected pad's
+    A resumed.
   - **X**: inventory (I); in combat (with the interface enabled) a tap opens the inventory
     too (I on release, user request: consistent with the INV glyph) and a hold (400 ms,
     `ProcessHeldButtons`) reloads (key R -> `intface_quick_reload`, the active weapon whatever
@@ -588,12 +601,13 @@ inventory while the left stick moved the pointer.
   ran inside (roof hidden). Not tested: exit grids, spatial scripts, combat start mid-offset,
   saving mid-offset (the offset is saved with the object; harmless).
 - **Dev menu** (XBOX OPTS, Y or the hint corner; `xo_dev_menu` in xboxopts.cc): a small window
-  over XBOX OPTS built from the same art (title band, three copies of the PAN CENTERS CURSOR
+  over XBOX OPTS built from the same art (title band, four copies of the PAN CENTERS CURSOR
   knob panel, the DONE plate). WALK STYLE HEX/FREE (`stick_walk_free`), FREE WALK PACE
   GLIDE/STRIDE (`[control] free_walk_pace`: 0 = constant speed at the cycle's average step,
   the first free version; 1 = the art's per-frame steps), FREE WALK STOP SLIDE/STEP
   (`free_walk_stop`: 0 = full speed at once and glide back onto the current hex on release;
-  1 = the 0.12 s ramp and walking on to a hex ahead). D-pad up/down/left/right, A turns the
+  1 = the 0.12 s ramp and walking on to a hex ahead), MOVIES OFF/ON (`[debug] disable_fmv`,
+  inverted; `gmovie_play` reads it before every movie, so it applies at once). D-pad up/down/left/right, A turns the
   selected knob, START/DONE applies (saved with `gconfig_save`), B/BACK cancels. A and B are
   read with the screen capture: walk mode's hidden-pointer A handling otherwise ate A here.
   Verified in XEMU: open, change, apply, reopen shows it, B cancels.

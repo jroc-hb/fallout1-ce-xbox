@@ -582,11 +582,11 @@ static bool xo_open()
 // --- Dev menu -------------------------------------------------------------
 //
 // Settings for trying things out, in a small window over XBOX OPTS built from
-// the same Preferences art: the title band, three copies of a two-position
+// the same Preferences art: the title band, four copies of a two-position
 // knob panel, and the DONE plate. D-pad up/down picks, left/right (or A, or a
 // click) turns a knob, START or DONE applies, B / BACK cancels.
 
-#define XO_DEV_COUNT 3
+#define XO_DEV_COUNT 4
 #define XO_DEV_PANEL_TOP 117 // the PAN CENTERS CURSOR panel in the background
 #define XO_DEV_PANEL_HEIGHT 78
 #define XO_DEV_WIDTH 196
@@ -598,6 +598,8 @@ static const XboxOptsKnob xo_dev_knobs[XO_DEV_COUNT] = {
     { "WALK STYLE", 2, { "HEX", "FREE" }, 0, 0 },
     { "FREE WALK PACE", 2, { "GLIDE", "STRIDE" }, 0, 0 },
     { "FREE WALK STOP", 2, { "SLIDE", "STEP" }, 0, 0 },
+    // [debug] disable_fmv, inverted (gmovie_play reads it before each movie).
+    { "MOVIES", 2, { "OFF", "ON" }, 0, 0 },
 };
 
 static int xo_dev_win = -1;
@@ -734,6 +736,9 @@ static void xo_dev_menu()
     xo_dev_values[0] = stick_walk_free_style() ? 1 : 0;
     xo_dev_values[1] = stick_walk_dev_pace();
     xo_dev_values[2] = stick_walk_dev_stop();
+    int disableFmv = 0;
+    config_get_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_DISABLE_FMV_KEY, &disableFmv);
+    xo_dev_values[3] = disableFmv != 0 ? 0 : 1;
     xo_dev_selected = 0;
     xo_dev_draw();
     xo_dev_park_pointer();
@@ -818,6 +823,7 @@ static void xo_dev_menu()
     if (save) {
         stick_walk_set_free_style_nosave(xo_dev_values[0] != 0);
         stick_walk_set_dev(xo_dev_values[1], xo_dev_values[2]);
+        config_set_value(&game_config, GAME_CONFIG_DEBUG_KEY, GAME_CONFIG_DISABLE_FMV_KEY, xo_dev_values[3] != 0 ? 0 : 1);
         gconfig_save();
     }
 

@@ -350,6 +350,15 @@ void display_scroll_down(int btn, int keyCode)
     }
 }
 
+// Back to the newest message (the gamepad's log scrolling, on LT release).
+void display_scroll_to_latest()
+{
+    if (disp_init && disp_curr != disp_start) {
+        disp_curr = disp_start;
+        display_redraw();
+    }
+}
+
 // 0x42C190
 void display_arrow_up(int btn, int keyCode)
 {
