@@ -10,6 +10,7 @@
 #include "game/game.h"
 #include "game/gsound.h"
 #include "game/message.h"
+#include "game/padkeys.h"
 #include "game/wordwrap.h"
 #include "platform_compat.h"
 #include "plib/color/color.h"
@@ -1129,6 +1130,8 @@ int save_file_dialog(char* title, char** fileList, char* dest, int fileListLengt
     win_draw(win);
 
     beginTextInput();
+    // The pad types the name on the on-screen keyboard (under the field).
+    padkeys_begin(x + 57, y + 190, false);
 
     int blinkingCounter = 3;
     bool blink = false;
@@ -1141,7 +1144,7 @@ int save_file_dialog(char* title, char** fileList, char* dest, int fileListLengt
         sharedFpsLimiter.mark();
 
         unsigned int tick = get_time();
-        int keyCode = get_input();
+        int keyCode = padkeys_frame(get_input());
         int scrollDirection = FILE_DIALOG_SCROLL_DIRECTION_NONE;
         int scrollCounter = 0;
         bool isScrolling = false;
@@ -1402,6 +1405,7 @@ int save_file_dialog(char* title, char** fileList, char* dest, int fileListLengt
         sharedFpsLimiter.throttle();
     }
 
+    padkeys_end();
     endTextInput();
 
     if (rc == 0) {

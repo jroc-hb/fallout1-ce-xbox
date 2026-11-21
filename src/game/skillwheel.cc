@@ -5,6 +5,17 @@
 #include <string.h>
 
 #include "game/actions.h"
+#include "game/bmpdlog.h"
+#include "game/combat.h"
+#include "game/critter.h"
+#include "game/display.h"
+#include "game/inventry.h"
+#include "game/item.h"
+#include "game/perk.h"
+#include "game/pipboy.h"
+#include "game/protinst.h"
+#include "game/proto_types.h"
+#include "game/stat.h"
 #include "game/art.h"
 #include "game/cycle.h"
 #include "game/game.h"
@@ -559,6 +570,203 @@ int menus_wheel_select(int openKey)
 
     int slot = wheel_run(&wheel);
     return slot >= 0 ? menus_keys[slot] : -1;
+}
+
+// The quick wheel (BACK held): shortcuts that would otherwise take a trip
+// through a menu. It acts itself, or returns a hotkey for game_handle_input.
+enum {
+    QUICK_SAVE,
+    QUICK_LOAD,
+    QUICK_HEAL,
+    QUICK_RELOAD,
+    QUICK_SNEAK,
+    QUICK_WALK,
+    QUICK_REST,
+    QUICK_CENTER,
+};
+
+static const char* quick_names[WHEEL_SLOTS] = {
+    "QUICK SAVE",
+    "QUICK LOAD",
+    "HEAL",
+    "RELOAD",
+    "SNEAK",
+    "WALK MODE",
+    "REST",
+    "CENTER VIEW",
+};
+
+// Opens on the entry used last, so a repeat (another heal) is BACK, A.
+static int quick_last = QUICK_HEAL;
+
+// Healing items, best first: stimpaks, then healing powder (no
+// perception penalty worth avoiding a heal for), super stimpaks last (they
+// hurt later) unless a lot is missing.
+#define QUICK_PID_HEALING_POWDER 273
+
+// display_print edits its text in place: never hand it a literal.
+static void quick_print(const char* text)
+{
+    char line[160];
+    snprintf(line, sizeof(line), "%s", text);
+    display_print(line);
+}
+
+static Object* quick_heal_item()
+{
+    int missing = stat_level(obj_dude, STAT_MAXIMUM_HIT_POINTS) - critter_get_hits(obj_dude);
+    int order[3] = { PROTO_ID_STIMPACK, QUICK_PID_HEALING_POWDER, PROTO_ID_SUPER_STIMPACK };
+    if (missing >= 50) {
+        order[0] = PROTO_ID_SUPER_STIMPACK;
+        order[1] = PROTO_ID_STIMPACK;
+        order[2] = QUICK_PID_HEALING_POWDER;
+    }
+    for (int index = 0; index < 3; index++) {
+        Object* item = inven_pid_is_carried_ptr(obj_dude, order[index]);
+        if (item != NULL && item_get_type(item) == ITEM_TYPE_DRUG) {
+            return item;
+        }
+    }
+    return NULL;
+}
+
+static int quick_heal_count()
+{
+    return inven_pid_quantity_carried(obj_dude, PROTO_ID_STIMPACK)
+        + inven_pid_quantity_carried(obj_dude, PROTO_ID_SUPER_STIMPACK)
+        + inven_pid_quantity_carried(obj_dude, QUICK_PID_HEALING_POWDER);
+}
+
+// Uses the item as the inventory's Use does, for the inventory's AP cost in
+// combat (the shortcut skips opening it, not paying for it).
+static void quick_heal()
+{
+    Object* item = quick_heal_item();
+    if (item == NULL) {
+        gsound_play_sfx_file("iisxxxx1");
+        quick_print("You have nothing to heal with.");
+        return;
+    }
+    if (critter_get_hits(obj_dude) >= stat_level(obj_dude, STAT_MAXIMUM_HIT_POINTS)) {
+        quick_print("You are already at full health.");
+        return;
+    }
+
+    if (isInCombat()) {
+        int actionPoints = 4 - perk_level(PERK_QUICK_POCKETS);
+        if (actionPoints > 0) {
+            if (actionPoints > obj_dude->data.critter.combat.ap) {
+                gsound_play_sfx_file("iisxxxx1");
+                quick_print("You don't have enough action points.");
+                return;
+            }
+            obj_dude->data.critter.combat.ap -= actionPoints;
+            intface_update_move_points(obj_dude->data.critter.combat.ap, combat_free_move);
+        }
+    }
+
+    gsound_play_sfx_file("ib1p1xx1");
+    if (item_d_take_drug(obj_dude, item)) {
+        item_remove_mult(obj_dude, item, 1);
+        obj_connect(item, obj_dude->tile, obj_dude->elevation, NULL);
+        obj_destroy(item);
+    }
+    intface_update_hit_points(true);
+}
+
+static void quick_wheel_hint(Wheel* wheel, char* line, int size)
+{
+    switch (wheel->selected) {
+    case QUICK_SAVE:
+        snprintf(line, size, "A: Save to the quick slot");
+        break;
+    case QUICK_LOAD:
+        snprintf(line, size, "A: Load the quick save");
+        break;
+    case QUICK_HEAL:
+        if (quick_heal_count() == 0) {
+            snprintf(line, size, "Nothing to heal with");
+        } else {
+            Object* item = quick_heal_item();
+            snprintf(line, size, "A: Use %s", item != NULL ? object_name(item) : "it");
+        }
+        break;
+    case QUICK_RELOAD:
+        snprintf(line, size, "A: Reload the weapon");
+        break;
+    case QUICK_SNEAK:
+        snprintf(line, size, "A: Turn %s", is_pc_flag(PC_FLAG_SNEAKING) ? "off" : "on");
+        break;
+    case QUICK_WALK:
+        snprintf(line, size, "A: Turn %s", GamepadStickWalkEnabled() ? "off" : "on");
+        break;
+    case QUICK_REST:
+        snprintf(line, size, "%s", isInCombat() ? "Not in combat" : "A: Pick how long");
+        break;
+    case QUICK_CENTER:
+        snprintf(line, size, "A: Center on you");
+        break;
+    default:
+        snprintf(line, size, "Pick one");
+        break;
+    }
+}
+
+int quick_wheel_select(int closeKey)
+{
+    Wheel wheel;
+    wheel_init(&wheel);
+    wheel.hint = quick_wheel_hint;
+    wheel.closeKey = closeKey;
+    wheel.selected = quick_last;
+    snprintf(wheel.title, sizeof(wheel.title), "%s", "QUICK");
+    for (int slot = 0; slot < WHEEL_SLOTS; slot++) {
+        snprintf(wheel.names[slot], sizeof(wheel.names[slot]), "%s", quick_names[slot]);
+    }
+    snprintf(wheel.subs[QUICK_HEAL], sizeof(wheel.subs[QUICK_HEAL]), "x%d", quick_heal_count());
+    snprintf(wheel.subs[QUICK_SNEAK], sizeof(wheel.subs[QUICK_SNEAK]), "%s", is_pc_flag(PC_FLAG_SNEAKING) ? "ON" : "OFF");
+    snprintf(wheel.subs[QUICK_WALK], sizeof(wheel.subs[QUICK_WALK]), "%s", GamepadStickWalkEnabled() ? "ON" : "OFF");
+
+    int slot = wheel_run(&wheel);
+    if (slot < 0) {
+        return -1;
+    }
+    quick_last = slot;
+
+    switch (slot) {
+    case QUICK_SAVE:
+        return KEY_F6;
+    case QUICK_LOAD:
+        if (1) {
+            const char* title = "Load the quick save?";
+            if (dialog_out(title, NULL, 0, 169, 116, colorTable[32328], NULL, colorTable[32328], DIALOG_BOX_YES_NO) != 0) {
+                return KEY_F7;
+            }
+        }
+        return -1;
+    case QUICK_HEAL:
+        quick_heal();
+        return -1;
+    case QUICK_RELOAD:
+        return KEY_LOWERCASE_R;
+    case QUICK_SNEAK:
+        action_skill_use(SKILL_SNEAK);
+        return -1;
+    case QUICK_WALK:
+        GamepadToggleStickWalk();
+        return -1;
+    case QUICK_REST:
+        if (isInCombat()) {
+            gsound_play_sfx_file("iisxxxx1");
+            return -1;
+        }
+        gsound_play_sfx_file("ib1p1xx1");
+        pipboy(PIPBOY_OPEN_INTENT_REST);
+        return -1;
+    case QUICK_CENTER:
+        return KEY_HOME;
+    }
+    return -1;
 }
 
 void skill_wheel_use(int rc)

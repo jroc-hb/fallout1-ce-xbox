@@ -17,6 +17,7 @@
 #include "plib/gnw/input.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
+#include "plib/gnw/padnav.h"
 
 namespace fallout {
 
@@ -208,7 +209,16 @@ int main_menu_create()
         }
 
         win_register_button_mask(buttons[index], button_up_data);
+#ifdef NXDK
+        // The d-pad highlight lights the whole plate, label included.
+        padnav_set_highlight_rect(buttons[index], 425 - 12, index * 42 - index + 45 - 3, 192, 33);
+#endif
     }
+
+#ifdef NXDK
+    // Escape means Exit here: B does nothing.
+    padnav_set_back_key(main_window, 0);
+#endif
 
     text_font(104);
 

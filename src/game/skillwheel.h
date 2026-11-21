@@ -19,6 +19,12 @@ void skill_wheel_use(int rc);
 // game_handle_input) or -1. `openKey` (the key BACK sends) also closes it.
 int menus_wheel_select(int openKey);
 
+// The quick wheel (BACK held): quick save / load, heal (best healing item,
+// the inventory's AP cost in combat), reload, sneak, walk mode, rest, center
+// the view. Does the action itself, or returns a hotkey for game_handle_input
+// (-1: nothing). `closeKey` (BACK's tap) also closes it.
+int quick_wheel_select(int closeKey);
+
 } // namespace fallout
 
 #endif /* FALLOUT_GAME_SKILLWHEEL_H_ */

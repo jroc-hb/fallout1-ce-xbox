@@ -2144,6 +2144,11 @@ static int combat_input()
 {
     int input;
 
+#ifdef NXDK
+    // Combat started with the pad's White on a walk-mode highlight.
+    gmouse_combat_aim_apply();
+#endif
+
     while ((combat_state & COMBAT_STATE_0x02) != 0) {
         sharedFpsLimiter.mark();
 

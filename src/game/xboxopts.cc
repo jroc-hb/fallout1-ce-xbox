@@ -24,6 +24,9 @@
 #include "plib/gnw/mouse.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
+#include "plib/gnw/padnav.h"
+
+#include <SDL3/SDL.h>
 
 namespace fallout {
 
@@ -514,6 +517,12 @@ static bool xo_open()
         XO_HEIGHT,
         256,
         WINDOW_MODAL | WINDOW_DONT_MOVE_TOP);
+#ifdef NXDK
+    // It navigates with the d-pad itself; padnav only hides the pointer.
+    padnav_set_window_flags(xo_win, WINDOW_PAD_SELF_NAV);
+    // B cancels (as Back does); Escape would apply.
+    padnav_set_back_key(xo_win, SDL_SCANCODE_F11);
+#endif
     if (xo_win == -1) {
         mem_free(xo_background);
         xo_background = NULL;

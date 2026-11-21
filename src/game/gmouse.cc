@@ -3383,6 +3383,59 @@ void gmouse_near_target_update(bool enabled)
     gmouse_near_set(best, false);
 }
 
+static Object* gmouse_combat_aim = NULL;
+
+void gmouse_combat_aim_prepare()
+{
+    gmouse_combat_aim = NULL;
+    if (gmouse_walk_hidden && gmouse_near != NULL && gmouse_near != obj_dude
+        && FID_TYPE(gmouse_near->fid) == OBJ_TYPE_CRITTER && !critter_is_dead(gmouse_near)) {
+        gmouse_combat_aim = gmouse_near;
+    }
+}
+
+void gmouse_combat_aim_clear()
+{
+    gmouse_combat_aim = NULL;
+}
+
+void gmouse_combat_aim_apply()
+{
+    Object* aim = gmouse_combat_aim;
+    gmouse_combat_aim = NULL;
+    if (aim == NULL || obj_dude == NULL) {
+        return;
+    }
+
+    // Still on the map (never dereferenced before it's found).
+    static Object* objects[256];
+    int count = obj_list_near_tile(obj_dude->tile, 20, obj_dude->elevation, objects, 256);
+    bool found = false;
+    for (int index = 0; index < count; index++) {
+        if (objects[index] == aim) {
+            found = true;
+            break;
+        }
+    }
+    if (!found || critter_is_dead(aim)) {
+        return;
+    }
+
+    gmouse_walk_show_pointer(false);
+
+    // The crosshair when the active item allows it (as gmouse_jump_to_target).
+    Object* item;
+    if (intface_get_current_item(&item) == 0 && (item == NULL || item_get_type(item) == ITEM_TYPE_WEAPON)) {
+        gmouse_3d_set_mode(GAME_MOUSE_MODE_CROSSHAIR);
+    }
+
+    int x;
+    int y;
+    if (gmouse_target_on_screen(aim, &x, &y)) {
+        gmouse_select_target(aim, x, y);
+    }
+}
+
 bool gmouse_near_target_step(int dirX, int dirY)
 {
     if (!gmouse_walk_hidden || obj_dude == NULL) {

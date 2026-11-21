@@ -60,6 +60,10 @@ void win_refresh_all(Rect* rect);
 void win_drag(int win);
 void win_get_mouse_buf(unsigned char* a1);
 Window* GNW_find(int win);
+#ifdef NXDK
+int GNW_window_count();
+Window* GNW_window_at(int index);
+#endif
 unsigned char* win_get_buf(int win);
 int win_get_top_win(int x, int y);
 int win_width(int win);

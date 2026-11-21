@@ -206,7 +206,7 @@ POINTER/CAMERA deadzone and sensitivity (the `left_stick_*`/`right_stick_*` keys
 pointer stick, whichever physical stick that is), SAFE AREA, RUMBLE. The hint corner says
 "CHANGING THIS RESTARTS GAME" while DISPLAY or SAFE AREA is selected. Coordinates are the Preferences screen's (`options.cc` `btndat`, `UpdateThing`),
 shifted as noted in the file. D-pad up/down selects, left/right changes, START (sent as Escape)
-applies, BACK (`b`) cancels; the mouse works on the knobs, sliders and buttons too.
+applies, BACK (F11) or B (padnav back key F11) cancels; the mouse works on the knobs, sliders and buttons too.
 - It edits `f1_res.ini` (`[MAIN] SCR_WIDTH/SCR_HEIGHT` = video mode, `[XBOX] UI_SCALE` 0-2 and
   `SAFE_AREA` 0-8) and `fallout.cfg` `[control]` keys. Changing DISPLAY or SAFE AREA relaunches
   `default.xbe`.
@@ -221,7 +221,9 @@ applies, BACK (`b`) cancels; the mouse works on the knobs, sliders and buttons t
   - the LT glyph overlay on the HUD (`intface_glyph_spots` in intface.cc: which glyph sits on
     which bar button, and whether a button gets one at all);
   - the glyphs in our own UI: the walk-mode label (`gmouse_near_label` passes `PAD_GLYPH_A`),
-    the wheels' "A ..." / "B Close" hints (skillwheel.cc `wheel_draw`);
+    the wheels' "A ..." / "B Close" hints (skillwheel.cc `wheel_draw`), the inventory and
+    loot screens' hint strip (inventry.cc `ipad_hint_show`), and what those screens do with
+    each button (`ipad_frame`);
   - `padglyph.cc` if a button needs a glyph that doesn't exist yet (add it to `PadGlyph` and its
     style table, plus any letters the 5x7 font lacks).
 - **Button map** (gamepad.cc `HandleControllerButtonDown/Up`, 2026-11-17 redesign: triggers and
@@ -233,11 +235,29 @@ applies, BACK (`b`) cancels; the mouse works on the knobs, sliders and buttons t
     (the existing brake) and every usable object on screen outlined (`gmouse_show_all_update`,
     from `ProcessTriggers`; hands the outline over to the walk highlight / d-pad selection if
     they're on the same object). LT + d-pad still sends 1-8 (skill hotkeys).
-  - **X**: inventory (I); in combat (with the interface enabled) a tap reloads (key R ->
-    `intface_quick_reload`, the active weapon whatever its mode, reload AP charged) and a hold
-    (400 ms, `ProcessHeldButtons`) opens the inventory. **Y**: swap hands (B key).
+  - **X**: inventory (I); in combat (with the interface enabled) a tap opens the inventory
+    too (I on release, user request: consistent with the INV glyph) and a hold (400 ms,
+    `ProcessHeldButtons`) reloads (key R -> `intface_quick_reload`, the active weapon whatever
+    its mode, reload AP charged). **Y**: swap hands (B key).
     **Black**: weapon mode (N). **White**: tap = end turn (Space, on release), hold = end combat
-    (Enter). **Start**: Esc. **Back**: menus wheel (F11; F12 is the screenshot key).
+    (Enter, combat only); outside combat a tap starts combat (`stick_walk_request_combat` ->
+    `stick_walk_run_pending`, as the keyboard's A; ignored if the map loop doesn't take it
+    within 500 ms). With a walk-mode highlight on a living critter, `gmouse_combat_aim_prepare`
+    remembers it and `combat_input` calls `gmouse_combat_aim_apply` at the player's turn: pointer
+    shown, crosshair, target selected (verified on Slummer). **Start**: Esc. **Back**: tap = menus
+    wheel (F11, sent on release, so other screens reading F11 still get it), hold (400 ms,
+    `ProcessHeldButtons`) = quick wheel (F8; F12 is the screenshot key).
+  - The **quick wheel** (`quick_wheel_select`, skillwheel.cc; game.cc KEY_F8): quick save (F6)
+    and quick load (F7, after a YES/NO), heal (`quick_heal`: stimpak, healing powder PID 273, or
+    a super stimpak at 50+ HP missing; used as the inventory's Use does, for the inventory's
+    4 - Quick Pockets AP in combat; "x N" carried under the button), reload (R), sneak
+    (`action_skill_use(SKILL_SNEAK)`), walk mode (`GamepadToggleStickWalk`), rest
+    (`pipboy(PIPBOY_OPEN_INTENT_REST)`, not in combat), center view (Home). Opens on the last
+    used entry (`quick_last`). **`display_print` edits its text in place**: passing it a
+    string literal wrote into .rdata and crashed (fatal 0xC0000005); `quick_print` copies first.
+    Verified in XEMU: tap/hold split, heal 16 -> 26 HP (x4 -> x3), "already at full health",
+    sneak on, quick save's slot picker, rest -> alarm clock, walk mode toggle. Not exercised:
+    quick load's dialog, reload, center view, heal in combat.
   - Stick clicks go by the physical stick, whatever the swap: **left** toggles walk mode
     (`GamepadToggleStickWalk`: saves `[control] stick_walk` with `gconfig_save`, prints
     "Controls: walk with the left stick." / "Controls: pointer.", plays the haptic tick); in
@@ -268,7 +288,16 @@ applies, BACK (`b`) cancels; the mouse works on the knobs, sliders and buttons t
     restores the bar. Each glyph is centred on its button (`intface_glyph_spots`, centres in bar
     coordinates): Y swap hands, X INV, START options, Black item box, RS Skilldex, BACK on the
     MAP/CHA/PIP column (they're in the menus wheel), White on END TURN / END CMBT (only while the
-    combat panel is open). Only shown while the bar is the top window (checked at the AP lights,
+    combat panel is open) or on the closed panel (start combat), X on the item box in combat
+    (hold reloads; spots have `when`: always / combat / no combat, and `held`).
+  - **HOLD tags** (user request): a glyph whose action needs the button held gets a dark
+    "HOLD" pill under it (`PAD_GLYPH_HOLD`, `pad_glyph_draw_held`; font has H/O/D now). Used on
+    X (reload) and White on END CMBT. Any new tap/hold split must mark the hold spot `held`.
+  - **Other screens' LT glyphs** (`pad_glyph_spots_set(win, spots, n)` / `_clear` /
+    `_update`, padglyph.cc; same fade, same copy-under windows, the window's buttons' images
+    included): dialogue Y on BARTER, barter Y on OFFER and B on TALK (`padModeOnly`: B is a right
+    click with the pointer). Registered in gdialog.cc's create/destroy of the dialogue and
+    barter windows. Shown while the first spot is on the top window. Verified in XEMU. Only shown while the bar is the top window (checked at the AP lights,
     which no glyph covers). Verified in XEMU in and out of combat, bar restored on release.
     The glyphs **fade with the trigger**: strength = (LT - 0.1) / 0.75, eased toward that at
     most a full fade per 150 ms (so XEMU's on/off triggers still fade), drawn in 8 steps by
@@ -281,6 +310,228 @@ applies, BACK (`b`) cancels; the mouse works on the knobs, sliders and buttons t
     Zark ("You see a thug"); in combat X reloaded an empty pistol, Black cycled SINGLE/RELOAD, Y
     swapped hands, White ended the turn (and, with no hostiles, combat). Not exercised: White
     hold, LS centering in combat, X hold.
+
+**On-screen keyboard** (`game/padkeys.cc`, NXDK). The text prompts call
+`padkeys_begin(fieldX, fieldY, firstCapital)` (or `padkeys_begin_at(top, ...)`), wrap
+`get_input()` in `padkeys_frame()`, and `padkeys_end()` when done: `get_input_str` (editor.cc,
+the name), `get_input_str2` (loadsave.cc, save description), `about_loop` (gdialog.cc, Tell Me
+About: placed over the talking head so the reply box stays visible), `save_file_dialog`
+(bmpdlog.cc, the character editor's Save / Print file name; its list then needs the pointer).
+`padkeys_frame` passes real
+key codes through and otherwise turns pad presses into characters / KEY_BACKSPACE /
+KEY_RETURN / KEY_ESCAPE, so the prompts' own code does the editing. Layout: 4 rows of 10
+characters (digits, qwerty, `-.'?`) and SHIFT / SPACE / DEL / DONE; hint strip with glyphs.
+- Input goes through `GamepadSetTextCapture` (gamepad.cc): every button but the stick clicks is
+  captured (only counted for `GamepadButtonPresses`), and it sets `gUiCapture` so A never clicks
+  and the sticks do nothing. The A press that opened the prompt (save screen DONE) used to type
+  a letter: A only counts after it has been seen up (`pk_a_released`). A captured A-up also
+  clears `gAButtonHeld`.
+- Verified in XEMU: save description "Test 5" (shift, space, digit) saved and shown in the
+  load list; Tell Me About "M" asked (answer visible); character creator name "Max" (B held
+  deleted the old default name with repeat). BACK cancel verified in Tell Me About.
+- XEMU testing note: the virtual pad's command file is a queue: a screenshot taken a fixed time
+  after queuing a long sequence can show the middle of it.
+- Dialogue BARTER / TELL ME ABOUT have plate highlights now (the dot alone was invisible).
+
+**Character editor without the pointer** (editor.cc, the `epad_*` block before
+`editor_design`, NXDK). The editor window is `WINDOW_PAD_SELF_NAV` with the gamepad's screen
+capture on (`epad_start` / `epad_end` from `CharEditStart` / `CharEditEnd`); `epad_frame(keyCode)`
+runs after `get_input` and returns the key code for the loop. Everything in the editor
+revolves around `info_line` (the selected item: stats 0-6, level rows 7-9, folder rows 10-29,
+tabs 40-42, conditions 43-50, derived stats 51-60, skills 61-78, 79/80/81 headers, traits
+82-97), which the screen already draws in its highlight colour and describes on the card.
+- `epad_build` lists the items each frame (window coordinates, from the draw code's layout;
+  the folder rows depend on its contents). Moving onto one sets `info_line` (and `skill_cursor`,
+  or `folder` for a tab) and redraws as `InfoButton` does, without reading the mouse. Items
+  with no look of their own (Name/Age/Sex, headers, character points, tabs, the bottom plates)
+  get `padnav_show_area`. The d-pad picks the nearest item that way (45 degree cone, then
+  anything past the item's edge).
+- A (on release) returns the item's event code: buttons (517/519/520, 500/501/502), tag
+  skill (536+), trait (555+). Left/right adjust instead of moving on a SPECIAL stat in
+  creation (`epad_stat_step`, one step of `StatButton`) and on a skill when levelling up if
+  there are points to spend or take back (the arrow goes to `SliderBtn`'s keyboard path);
+  otherwise they move. B returns Escape (cancel). Button baselines are re-synced after any
+  pad action (`epad_acted`), so presses inside the windows it opens don't leak back.
+- Pointer mode: the mouse works as before; a d-pad press goes back to pad mode on the item
+  under the pointer.
+- Age / Sex windows: DONE has the focus and a plate highlight, with
+  `padnav_set_adjust(doneBtn, proc, pressable = true)` (new parameter: A still presses it), so
+  left/right change the age or the gender (radio buttons updated) and A closes.
+- Perk window (`perks_dialog`, shared by the Tag!/Mutate lists): `padnav_set_filter` leaves only
+  DONE/CANCEL (plate rects) for the d-pad, so up/down reach `InputPDLoop`'s list.
+- Creating a character, only changeable items are on the cursor's path (name/age/sex, stats,
+  skills, traits, bottom buttons; user request: character points, derived stats and headers
+  looked selectable but did nothing). The character screen keeps every line (all reading).
+- The name window starts from the current name. The old NXDK default name "Vault Dweller"
+  (critter.cc `critter_pc_reset_name`, proto.cc) is gone: a new character is "None" as on PC.
+- Verified in XEMU: creation (stats +/-, char points, trait pick/unpick, tag skill via
+  DONE -> up, Age 25 -> 26, Sex -> Female, name "zx" typed, Options -> Save with the keyboard,
+  BACK / B cancels, DONE's "use all points" message dismissed with B without cancelling the
+  editor); level-up (temporary XP hook: perk window list + pick, Big Guns +3/-1 with the
+  points counter, tabs and karma / perk-folder trait rows, B cancel). Name field empty on a
+  new character. Not exercised: Kills
+  rows, Print, Load, starting the game from DONE.
+
+**World map / town maps** (worldmap.cc): plain padnav. The town list's red dots and the
+TOWN/WORLD switch get plate highlights; `padnav_set_filter(world_win, wm_pad_filter)` skips town
+slots not visited yet (`first_visit_flag`). Town map entrances (`TMSelBttns`, with hover art)
+are padnav buttons already. Verified: Cathedral town map -> Vault 15 town map -> Desert
+Entrance -> travel -> random encounter.
+- Free travel: the world map loop sets `GamepadSetPanHandler(wm_pad_pan)` (new, gamepad.cc: while
+  set, `ProcessRightStick` hands the camera stick's deflection and dt to the screen instead of
+  walking / panning the town map, which it used to scroll behind the world map). `wm_pad_pan`
+  accumulates pixels (0.6 px/ms at full deflection) that the loop adds to `viewport_x/y`
+  (clamped, autofollow off). When the pointer stick ends pad mode, the loop moves the pointer
+  onto the player's marker (padnav had parked it on a town button); A then clicks a spot as on
+  PC. Y (key `b`) while stopped (`dropbtn`) enters the area, as clicking your marker.
+  Verified: pan, pointer on the marker, travel into unexplored desert (random encounter), Y
+  entered the desert next to the Cathedral. No glyph for Y (no button to put it on).
+
+**Pip-Boy** (pipboy.cc). Plain padnav plus fixes:
+- Plate highlights for STATUS / AUTOMAPS / ARCHIVES / CLOSE (`47, y - 4, 122x23`).
+- Rows that hold two things, where the click's x decided (padnav presses the centre, which
+  matched neither): the status page (location left of x 429, holodisk right;
+  `AddStatusHotLines`) and the holodisk reader's bottom line (BACK left of 395, MORE/DONE right
+  of 459; `SplitHoloBackLine`) are two buttons each, same event code (`HotLinesRight`,
+  `holo_more_btn`, deleted in `NixHotLines`).
+- `hot_back_line` was never set (decompilation slip), so back lines were never deleted and
+  piled up; `AddHotLines` sets it now. B (Escape in pad mode) with a back line calls the page's
+  back (1025; 1027 = page back in a holodisk) instead of closing.
+- The alarm clock is off the d-pad path (`padnav_set_filter`: from the lists the d-pad landed
+  on it and couldn't get down to the menu) and on Y (key `b` -> 504) with an LT glyph spot.
+- Verified: menu highlights, status -> Vault 13 quests -> B back -> B close, automaps -> Vault
+  13, alarm via Y and rest via A, LT glyph. Not exercised: holodisks and archives (none in the
+  test save).
+
+**D-pad menu navigation without the pointer** (`plib/gnw/padnav.cc`). Generic, so every GNW
+screen gets it without per-screen code:
+- Each frame (`padnav_update`, from `process_bk`) it collects the eligible buttons of the
+  windows a click could reach: top down, skipping hidden windows and its own overlays, stopping
+  at a modal window or one flagged `WINDOW_NO_PAD_NAV` (map view, HUD, inventory/loot/barter
+  `i_wid`: they have their own pad code, below) or `WINDOW_PAD_SELF_NAV` (XBOX OPTS, which
+  navigates itself; padnav only hides the pointer). Eligible: enabled, does something on a
+  left click, not tiny, not a hotspot covering most of a big window, not a position-reading
+  area taller than 150 px (the save slot list: the screen's own arrow keys handle it), and not
+  a button that only sends an arrow / page key (dialogue reply halves, list arrows).
+- **Pad mode** (pointer hidden, focused button highlighted) vs **pointer mode**. The highlight
+  (a gold rectangle at first, replaced as too ugly; user feedback): GNW hover works off the
+  pointer position whether it's visible or not, so in pad mode the hidden pointer is parked on
+  the focused button and the game draws its own hover look. Buttons count as having one if they
+  have a hover image, a mouse-enter proc, or distinct enter/exit event codes (dialogue options:
+  1200+n / 1300+n, recoloured yellow by the dialogue loop; Preferences' sliders share 526 for
+  both, no visual). Others (main menu / DONE red buttons, Preferences knobs and sliders) get a
+  brightened copy of their window pixels (`cmap` RGB x1.4 + 1, via `colorTable`) in one
+  `WINDOW_PAD_OVERLAY` window, refreshed every frame, table rebuilt per new highlight in case the
+  palette changed.
+  - `padnav_set_highlight_rect(btn, x, y, w, h)`: a screen can make the highlight cover a bigger
+    area than the button (window coordinates; dropped when the window is deleted). Used where the
+    button is just a red dot on a plate with its label in the background art: main menu (plate
+    x-12..x+179, y-3..y+29 from the button), Load/Save DONE/CANCEL (x-11, y-5, 98x24),
+    Preferences DEFAULT/DONE/CANCEL (x-8, y-5, 101/98 x 23). Measured from screenshots.
+  - The overlay only refreshes when `process_bk` runs, so it outlived its menu during transitions
+    that don't (Exit Game's fade, the barter panel sliding in; user report). It is now created
+    with its source window's `WINDOW_MOVE_ON_TOP`, so any window opened later stacks above it
+    (no need to delete it on `win_add`: doing that repainted the spot from the next screen's
+    not-yet-drawn window, a black rectangle while the main menu faded; user report), and
+    `win_delete` of the source window calls `padnav_window_changed`, which drops it. Verified:
+    Exit Game -> YES, Barter, and main menu -> Load Game transitions.
+  - The copy layers the source window's buttons' `currentImage` over its buffer, as GNW does
+    when drawing: a button state change (`button_draw(..., draw=true)`) never reaches the window
+    buffer, so the pressed image only showed this way.
+  - A/RT press the button on A down (`win_button_press`: pressed image + left-down event) and
+    release it on A up (`padnav_release` -> `win_button_release`: normal image + left-up event,
+    the click), so the press shows as with a mouse (user request). Verified on the main menu.
+- `ProcessLeftStick` calls `padnav_pointer_moved` when a
+  pointer stick moves: pointer back on the focused button, frame gone. A d-pad press with a nav
+  window returns to pad mode. Default follows walk mode (`padnav_set_pad_by_default`): with walk
+  mode on a newly opened menu starts in pad mode, with it off (PC-like) in pointer mode.
+- The gamepad's d-pad handlers call `padnav_dpad`: nearest candidate within 45 degrees of the
+  direction (score along + 3 * across, edge overlap counts as 0 across). Nothing that way ->
+  the arrow key is sent as before, so screens' own wrap-around/list handling still works.
+  A/RT (`ProcessTriggers`) call `padnav_activate`: the hidden pointer is put on the button's
+  centre (some screens read the click position, e.g. the Preferences knobs), then the button is
+  pressed until A is released (above); the press never becomes a mouse click.
+- **B is back** while padnav is active (pad mode with a nav window, or a `WINDOW_PAD_SELF_NAV`
+  window in pad mode): `padnav_back_key()` gives the SDL scancode B sends instead of the right
+  click, Escape unless the window registered another with `padnav_set_back_key(win, scancode)`
+  (dropped on `win_delete`): main menu 0 = nothing (Escape there is Exit), XBOX OPTS F11 (Escape
+  applies). Escape cancels/closes almost every GNW screen (dialog boxes, Pip-Boy, editor,
+  Preferences, options, load/save, Skilldex, automap, elevator, character select); the dialogue
+  reply loop ignores it. Its key-up is sent on B up. Pointer mode and the map (NO_PAD_NAV)
+  keep B as right click / walk-mode Look. Verified: main menu (nothing), character select,
+  in-game options, Preferences -> options, Pip-Boy. XBOX OPTS not exercised.
+- `padnav_set_adjust(btn, proc)`: a slider; left/right call `proc(btn, dir)` instead of moving
+  (Preferences' range sliders, `PrefAdjustSlider`, a twentieth of the range per press;
+  unregistered in `PrefEnd` because button ids are reused).
+- Focus: kept on the same button id; else a pending request (`warp_mouse_to_button` /
+  `warp_mouse_to_dialogue_option` call `padnav_set_focus`, and in pad mode only move the hidden
+  pointer, hiding it first so no cursor image is left behind) taken when that button appears
+  (within 1 s: dialogue asks before creating its options); else the button nearest where the
+  focus was (same menu); else top left.
+- Back on the map with pad mode on in walk mode, `stick_walk_update` re-hides the pointer.
+- Verified in XEMU: main menu (highlight, d-pad, right stick shows pointer, d-pad hides it), Load
+  Game (DONE/CANCEL, list via arrows, loaded a save), Start menu, Preferences (knobs and toggles
+  with A, slider with left/right), dialogue (options, a lone [Done] option, closing), XBOX OPTS.
+  Not checked: character creation/editor, Pip-Boy, world/town maps, Skilldex window, combat
+  options, quantity/pickers, walk mode off. Highlights verified: main menu and DONE buttons lit,
+  dialogue options yellow, Preferences knob panel and slider row lit.
+
+**Inventory, use-item-on, loot and barter without the pointer** (inventry.cc, the `ipad_*`
+block before `inven_set_dude`, NXDK only). These screens are all mouse-driven: a slot is an
+invisible button whose key code (1000+row your list, 1006/1007/1008 right hand/left hand/armor,
+2000+row the other list, 2300+/2400+ the barter tables) reaches the loop with the mouse button
+state, and every drag (`inven_pickup`, `move_inventory`, `barter_move_inventory`,
+`barter_move_from_table_inventory`) shows the item as the cursor, waits for the button to come
+up, then hit-tests the pointer. The pad code drives exactly that:
+- `ipad_begin(type)` / `ipad_end()` around each loop; `ipad_frame(keyCode)` right after
+  `get_input`. In pad mode (padnav's, `padnav_menu_opened` at open) it hides the pointer, parks
+  it on the focused slot, shows the highlight with `padnav_show_area` (padnav's brightened
+  overlay, drawn while no padnav window is above), and returns the key code to handle: a slot's
+  key for a pad "click" (`ipad_dispatch`), Escape/`t`/`m`/`A`/2500 for B/X/Y, or -1. The loops
+  read `inven_left_down()` / `inven_right_down()` / `inven_menu_mode()` instead of the raw mouse
+  state, so a pad click goes down the mouse path.
+- A drag the pad started drops where `ipad_drop` says (`ipad_drag`, in place of the wait loop):
+  a slot (the hidden pointer is parked on it, so the screen's own hit test decides), or
+  `IPAD_DROP_CARRY`: the item is shown as the pointer and moved slot to slot with the d-pad
+  until A (drop) or B (back on its own slot). No list scrolling while carrying (the drag code
+  keeps the list offset it started with).
+- Buttons are read with the gamepad's **screen capture** (`GamepadSetScreenCapture`): while on,
+  in pad mode and with no padnav window above (`GamepadScreenCaptureActive`), A/RT don't click
+  and B/X/Y/Black/White send no keys; the screen polls `GamepadButtonPresses` (press counters,
+  so a tap shorter than a frame isn't lost) and `GamepadClickHeld`. A key-up is only swallowed
+  if its key-down was (`gButtonCaptured`), so X's "I" opening the inventory still gets released.
+  The d-pad keeps sending arrows (key repeat for free).
+- Mapping: inventory A tap carry, A hold (350 ms) the item action menu (`inven_action_cursor`
+  with `ipad_menu` 1: no click-or-hold wait, menu at the slot, d-pad selection while A is held,
+  B = Cancel), X Use (`ipad_menu` 2 runs `GAME_MOUSE_ACTION_MENU_ITEM_USE` directly if the menu
+  would offer it), Y equip (armor slot or the active hand, `intface_is_item_right_hand`) /
+  take off (`ipad_unequip_target`: a free row, never onto a container, which would swallow
+  it), B close (out of a bag first). Loot: A moves to the other list, X Take All (`A`), B Done.
+  Barter: A inventory <-> own offer table, Y Offer (`m`), B Talk (`t`). Black/White page the
+  focused list. Up/down past a list's visible rows scrolls it.
+- Focus: the d-pad goes along a list, else to the nearest slot within ~50 degrees, else the
+  nearest on that side (the hands are far below the list's top rows). Reachable slots: rows
+  with items (at least row 0 of each list) plus hands/armor.
+- The focused item is described: inventory info panel (`inven_obj_examine_func`, stats on an
+  empty slot), barter `obj_look_at_func` into the dialogue box, loot nothing (it would fill the
+  message log). `ipad_described_key` is reset after any pad action and on returning to pad
+  mode, since those may have redrawn the panel.
+- Hint strip (`ipad_hint_show`): its own MOVE_ON_TOP window with the clean background art and
+  glyphs: inventory bottom of the info panel (only over a description: over the stats it would
+  cover the weight), loot the middle plate. None in barter (not placed yet).
+- The pointer stick switches to pointer mode as everywhere (pointer on the focused slot, mouse
+  behaviour as before, B right-clicks, X closes the inventory); the d-pad switches back, onto
+  the slot under the pointer.
+- Verified in XEMU: inventory highlight/description, Y equip, carry knife to ITEM2, X Use
+  (stimpak), A hold menu -> Use (lit a flare), B close, pointer round trip, hints; loot (opened
+  with a temporary hook on a living guard): A both ways, X Take All, hint, B; the quantity
+  window over the inventory (padnav; it opens on DONE, `padnav_set_focus` in
+  `setup_move_timer_win`, with plate highlights for DONE/CANCEL; A on ALL gave 004, B and
+  CANCEL cancelled without closing the inventory).
+- Presses made in a window a pad action opened (quantity window, message box) are that
+  window's: `ipad_frame` resets its button baselines after every pad action, or the B that
+  cancelled the quantity window also closed the inventory (found in testing). **Barter not
+  tested** (no merchant reachable from the saves); use-item-on not tested.
 
 **Stick walking** (prototype; `game/stickwalk.cc`): walk mode, toggled in-game with the left stick
 click (`[control] stick_walk`, default 0; it used to be SWAP STICKS = WALK / `swap_sticks=2`,

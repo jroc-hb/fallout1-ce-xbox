@@ -158,6 +158,14 @@ bool gmouse_near_target_use();
 Object* gmouse_near_target_for_mode(int mode);
 // Examines the highlighted object (B in walk mode). False if there is none.
 bool gmouse_near_target_look();
+
+// Starting combat from the pad (White) while walk mode highlights a living
+// critter: remember it (prepare, before combat()), and when the player's
+// first turn begins put the attack crosshair on it (apply, combat.cc), so A
+// attacks it. clear drops what wasn't used.
+void gmouse_combat_aim_prepare();
+void gmouse_combat_aim_apply();
+void gmouse_combat_aim_clear();
 // While `on` (LT held), outlines every usable object on screen; call every
 // frame, it removes them again once off.
 void gmouse_show_all_update(bool on);

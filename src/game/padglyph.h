@@ -17,6 +17,8 @@ typedef enum PadGlyph {
     PAD_GLYPH_LS, // the left stick click: grey disc, "LS"
     PAD_GLYPH_START, // dark pill, "START"
     PAD_GLYPH_BACK, // dark pill, "BACK"
+    PAD_GLYPH_HOLD, // dark pill, "HOLD": goes under a button glyph whose
+                    // action needs the button held (pad_glyph_draw_held)
     PAD_GLYPH_COUNT,
 } PadGlyph;
 
@@ -31,6 +33,28 @@ int pad_glyph_width(PadGlyph glyph);
 // width x height. Index 0 (transparent in sprites) is never written.
 void pad_glyph_draw(unsigned char* buf, int pitch, int width, int height, int x, int y, PadGlyph glyph);
 
+// A button glyph with the HOLD pill under it, centred on each other: for a
+// button that does something else when tapped. Its size:
+int pad_glyph_held_width(PadGlyph glyph);
+int pad_glyph_held_height();
+void pad_glyph_draw_held(unsigned char* buf, int pitch, int width, int height, int x, int y, PadGlyph glyph);
+
+// Hold-LT glyph overlays outside the HUD (intface.cc has the HUD's): spots
+// on a window, glyph centres in its coordinates. padModeOnly: only while the
+// pointer is hidden (the button means something else in pointer mode).
+typedef struct PadGlyphSpot {
+    int x;
+    int y;
+    PadGlyph glyph;
+    bool padModeOnly;
+} PadGlyphSpot;
+
+// Registers (replaces) a window's spots; clear when the window goes (a
+// deleted window is also dropped on its own).
+void pad_glyph_spots_set(int win, const PadGlyphSpot* spots, int count);
+void pad_glyph_spots_clear(int win);
+// Every frame with LT's value (gamepad.cc, next to intface_show_pad_glyphs).
+void pad_glyph_spots_update(float trigger);
 
 } // namespace fallout
 

@@ -22,6 +22,14 @@ typedef enum WindowFlags {
     // Draggable?
     WINDOW_FLAG_0x80 = 0x80,
     WINDOW_MANAGED = 0x100,
+    // CE (padnav.cc): the d-pad doesn't navigate this window's buttons and
+    // nothing below it (the map view, the HUD, the inventory).
+    WINDOW_NO_PAD_NAV = 0x200,
+    // CE (padnav.cc): the window navigates itself with the d-pad (XBOX
+    // OPTS); padnav only hides the pointer over it.
+    WINDOW_PAD_SELF_NAV = 0x400,
+    // CE (padnav.cc): one of padnav's own highlight windows.
+    WINDOW_PAD_OVERLAY = 0x800,
 } WindowFlags;
 
 typedef enum ButtonFlags {

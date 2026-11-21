@@ -39,6 +39,11 @@
 #include "platform_compat.h"
 #include "plib/color/color.h"
 #include "plib/db/db.h"
+#include "plib/gnw/padnav.h"
+#ifdef NXDK
+#include "plib/gnw/gamepad.hpp"
+#include "plib/gnw/mouse.h"
+#endif
 #include "plib/gnw/button.h"
 #include "plib/gnw/debug.h"
 #include "plib/gnw/gnw.h"
@@ -98,6 +103,14 @@ static void TargetTown(int city);
 static int InitWorldMapData();
 static void UnInitWorldMapData();
 static void UpdateTownStatus();
+#ifdef NXDK
+static bool wm_pad_filter(int btn);
+static void wm_pad_pan(float x, float y, float dtMs);
+
+// Camera stick: pixels to scroll, taken by the world map loop.
+static float wm_pan_x = 0.0f;
+static float wm_pan_y = 0.0f;
+#endif
 static int InCity(unsigned int x, unsigned int y);
 static void world_move_init();
 static int world_move_step();
@@ -1146,6 +1159,14 @@ int world_map(WorldMapContext ctx)
 
         hover = 0;
 
+#ifdef NXDK
+        // The camera stick scrolls the map; Y enters the area you're
+        // stopped at (as clicking your own marker).
+        GamepadSetPanHandler(wm_pad_pan);
+        wm_pan_x = 0.0f;
+        wm_pan_y = 0.0f;
+        bool wmWasPadMode = padnav_pad_mode_on();
+#endif
         while (!done) {
             sharedFpsLimiter.mark();
 
@@ -1154,6 +1175,37 @@ int world_map(WorldMapContext ctx)
             }
             time = get_time();
             input = get_input();
+
+#ifdef NXDK
+            // The pointer stick brought the pointer back (pad mode off): start
+            // it on the player's marker, where travel starts, instead of the
+            // town list button it was parked on.
+            if (wmWasPadMode && !padnav_pad_mode_on()) {
+                int markerX = world_xpos - viewport_x + 22;
+                int markerY = world_ypos - viewport_y + 20;
+                Rect winRect;
+                if (markerX > 22 && markerX < 472 && markerY > 21 && markerY < 463 && win_get_rect(world_win, &winRect) == 0) {
+                    mouse_set_position(winRect.ulx + markerX, winRect.uly + markerY);
+                }
+            }
+            wmWasPadMode = padnav_pad_mode_on();
+
+            if ((input == KEY_LOWERCASE_B || input == KEY_UPPERCASE_B) && dropbtn) {
+                is_entering_city = 0;
+                gsound_play_sfx_file("ib2p1xx1");
+                reselect = 0;
+                is_entering_random_encounter = 0;
+                is_entering_random_terrain = 1;
+                temp_town = InCity(world_xpos, world_ypos);
+                if (temp_town != -1) {
+                    entering_city = temp_town;
+                    is_entering_city = 1;
+                    is_entering_random_terrain = 0;
+                }
+                break;
+            }
+#endif
+
             mouseGetPositionInWindow(world_win, &mouse_x, &mouse_y);
 
             mouse_dx = abs(mouse_x - (world_xpos - viewport_x + 22));
@@ -1419,6 +1471,32 @@ int world_map(WorldMapContext ctx)
 
                 should_redraw = 1;
             }
+
+#ifdef NXDK
+            // Camera stick panning (wm_pad_pan), pixel by pixel.
+            {
+                int panX = (int)wm_pan_x;
+                int panY = (int)wm_pan_y;
+                if (panX != 0 || panY != 0) {
+                    wm_pan_x -= panX;
+                    wm_pan_y -= panY;
+                    viewport_x += panX;
+                    viewport_y += panY;
+                    if (viewport_x < 0) {
+                        viewport_x = 0;
+                    } else if (viewport_x > VIEWPORT_MAX_X) {
+                        viewport_x = VIEWPORT_MAX_X;
+                    }
+                    if (viewport_y < 0) {
+                        viewport_y = 0;
+                    } else if (viewport_y > VIEWPORT_MAX_Y) {
+                        viewport_y = VIEWPORT_MAX_Y;
+                    }
+                    autofollow = 0;
+                    should_redraw = 1;
+                }
+            }
+#endif
 
             if (is_moving) {
                 v109 = 0;
@@ -1822,6 +1900,9 @@ int world_map(WorldMapContext ctx)
             renderPresent();
             sharedFpsLimiter.throttle();
         }
+#ifdef NXDK
+        GamepadSetPanHandler(NULL);
+#endif
 
         if (!done) {
             if (special_enc_num != 0 || is_entering_random_encounter) {
@@ -2740,6 +2821,10 @@ static int InitWorldMapData()
                 NULL,
                 BUTTON_FLAG_TRANSPARENT);
             win_register_button_sound_func(TownBttns[index], gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+            // The d-pad highlight lights the town's name plate too.
+            padnav_set_highlight_rect(TownBttns[index], 505, BttnYtab[index] - 3, 109, 21);
+#endif
         }
 
         WrldToggle = win_register_button(world_win,
@@ -2756,6 +2841,10 @@ static int InitWorldMapData()
             NULL,
             BUTTON_FLAG_TRANSPARENT);
         win_register_button_sound_func(WrldToggle, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+        padnav_set_highlight_rect(WrldToggle, 510, 426, 105, 40);
+        padnav_set_filter(world_win, wm_pad_filter);
+#endif
 
         tbutntgl = 1;
     }
@@ -2787,6 +2876,27 @@ static void UnInitWorldMapData()
 }
 
 // 0x4AD264
+#ifdef NXDK
+// The d-pad skips the town list's unknown slots (clicking one does nothing).
+static void wm_pad_pan(float x, float y, float dtMs)
+{
+    // Full deflection crosses the 450 px view in about 0.75 s.
+    const float pixelsPerMs = 0.6f;
+    wm_pan_x += x * pixelsPerMs * dtMs;
+    wm_pan_y -= y * pixelsPerMs * dtMs;
+}
+
+static bool wm_pad_filter(int btn)
+{
+    for (int index = 0; index < TOWN_COUNT; index++) {
+        if (TownBttns[index] == btn) {
+            return (first_visit_flag & (1 << index)) != 0;
+        }
+    }
+    return true;
+}
+#endif
+
 static void UpdateTownStatus()
 {
     int city;
@@ -3327,6 +3437,10 @@ WorldMapContext town_map(WorldMapContext ctx)
                 NULL,
                 BUTTON_FLAG_TRANSPARENT);
             win_register_button_sound_func(TownBttns[index], gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+            // The d-pad highlight lights the town's name plate too.
+            padnav_set_highlight_rect(TownBttns[index], 505, BttnYtab[index] - 3, 109, 21);
+#endif
         }
 
         WrldToggle = win_register_button(world_win,
@@ -3343,6 +3457,10 @@ WorldMapContext town_map(WorldMapContext ctx)
             NULL,
             BUTTON_FLAG_TRANSPARENT);
         win_register_button_sound_func(WrldToggle, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+        padnav_set_highlight_rect(WrldToggle, 510, 426, 105, 40);
+        padnav_set_filter(world_win, wm_pad_filter);
+#endif
 
         tbutntgl = 1;
     }

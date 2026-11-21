@@ -604,6 +604,15 @@ int game_handle_input(int eventCode, bool isInCombatMode)
             intface_quick_reload();
         }
         break;
+    case KEY_F8:
+        // The gamepad's quick wheel (BACK held).
+        if (intface_is_enabled()) {
+            int quickKey = quick_wheel_select(KEY_F11);
+            if (quickKey != -1) {
+                game_handle_input(quickKey, isInCombatMode);
+            }
+        }
+        break;
     case KEY_F11:
         // The gamepad's menus wheel (BACK).
         if (intface_is_enabled()) {

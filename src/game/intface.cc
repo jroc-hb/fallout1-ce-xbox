@@ -37,6 +37,7 @@
 #include "plib/gnw/rect.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
+#include "plib/gnw/padnav.h"
 
 namespace fallout {
 
@@ -408,6 +409,10 @@ int intface_init()
     int interfaceBarWindowY = screenGetHeight() - INTERFACE_BAR_HEIGHT;
 
     interfaceWindow = win_add(interfaceBarWindowX, interfaceBarWindowY, INTERFACE_BAR_WIDTH, INTERFACE_BAR_HEIGHT, colorTable[0], WINDOW_HIDDEN);
+#ifdef NXDK
+    // Part of the map view: the HUD's buttons have pad shortcuts (padnav.cc).
+    padnav_set_window_flags(interfaceWindow, WINDOW_NO_PAD_NAV);
+#endif
     if (interfaceWindow == -1) {
         // NOTE: Uninline.
         return intface_fatal_error(-1);
@@ -2230,20 +2235,27 @@ typedef struct IntfaceGlyphSpot {
     int x; // the glyph's centre, in the bar
     int y;
     PadGlyph glyph;
-    bool combatOnly; // the END TURN / END CMBT buttons
+    int when; // INTFACE_GLYPH_ALWAYS / _COMBAT (END TURN, END CMBT) / _NO_COMBAT
+    bool held; // the action needs the button held: HOLD under the glyph
 } IntfaceGlyphSpot;
+
+#define INTFACE_GLYPH_ALWAYS 0
+#define INTFACE_GLYPH_COMBAT 1
+#define INTFACE_GLYPH_NO_COMBAT 2
 
 // Each glyph sits on the middle of its button (it's only up while LT is
 // held, so covering the button doesn't matter).
 static const IntfaceGlyphSpot intface_glyph_spots[] = {
-    { 229, 16, PAD_GLYPH_Y, false }, // swap hands (218,6 22x21)
-    { 227, 51, PAD_GLYPH_X, false }, // INV (211,41 32x21)
-    { 227, 79, PAD_GLYPH_START, false }, // options (210,62 34x34)
-    { 361, 59, PAD_GLYPH_BLACK, false }, // item mode (267,26 188x67)
-    { 534, 17, PAD_GLYPH_RS, false }, // Skilldex: the skill wheel (523,7 22x21)
-    { 546, 68, PAD_GLYPH_BACK, false }, // MAP / CHA / PIP: the menus wheel (526,40 41x57)
-    { 609, 54, PAD_GLYPH_WHITE, true }, // END TURN, tap (590,43 38x22)
-    { 609, 76, PAD_GLYPH_WHITE, true }, // END CMBT, hold (590,65 38x22)
+    { 229, 16, PAD_GLYPH_Y, INTFACE_GLYPH_ALWAYS, false }, // swap hands (218,6 22x21)
+    { 227, 51, PAD_GLYPH_X, INTFACE_GLYPH_ALWAYS, false }, // INV (211,41 32x21)
+    { 227, 79, PAD_GLYPH_START, INTFACE_GLYPH_ALWAYS, false }, // options (210,62 34x34)
+    { 361, 59, PAD_GLYPH_BLACK, INTFACE_GLYPH_ALWAYS, false }, // item mode (267,26 188x67)
+    { 300, 59, PAD_GLYPH_X, INTFACE_GLYPH_COMBAT, true }, // in combat holding X reloads the item
+    { 534, 17, PAD_GLYPH_RS, INTFACE_GLYPH_ALWAYS, false }, // Skilldex: the skill wheel (523,7 22x21)
+    { 546, 68, PAD_GLYPH_BACK, INTFACE_GLYPH_ALWAYS, false }, // MAP / CHA / PIP: the menus wheel (526,40 41x57)
+    { 609, 54, PAD_GLYPH_WHITE, INTFACE_GLYPH_COMBAT, false }, // END TURN, tap (590,43 38x22)
+    { 609, 77, PAD_GLYPH_WHITE, INTFACE_GLYPH_COMBAT, true }, // END CMBT, hold (590,65 38x22)
+    { 609, 65, PAD_GLYPH_WHITE, INTFACE_GLYPH_NO_COMBAT, false }, // the closed combat panel: start combat
 };
 
 #define INTFACE_GLYPH_SPOTS (sizeof(intface_glyph_spots) / sizeof(intface_glyph_spots[0]))
@@ -2253,6 +2265,7 @@ static int intface_glyph_windows[INTFACE_GLYPH_SPOTS];
 static unsigned char* intface_glyph_under[INTFACE_GLYPH_SPOTS];
 static unsigned char* intface_glyph_art[INTFACE_GLYPH_SPOTS];
 static int intface_glyph_w[INTFACE_GLYPH_SPOTS];
+static int intface_glyph_h[INTFACE_GLYPH_SPOTS];
 
 // Fade: how much of the glyphs shows (0..1), eased toward the trigger, and
 // the step last drawn.
@@ -2285,7 +2298,6 @@ static void intface_glyphs_hide()
 // to the nearest palette colour (8-bit, no real transparency).
 static void intface_glyphs_draw(int step)
 {
-    int height = pad_glyph_size();
     int amount = step * 256 / INTFACE_GLYPH_FADE_STEPS;
     for (unsigned int index = 0; index < INTFACE_GLYPH_SPOTS; index++) {
         int win = intface_glyph_windows[index];
@@ -2294,7 +2306,7 @@ static void intface_glyphs_draw(int step)
         }
 
         unsigned char* buf = win_get_buf(win);
-        int size = intface_glyph_w[index] * height;
+        int size = intface_glyph_w[index] * intface_glyph_h[index];
         for (int pixel = 0; pixel < size; pixel++) {
             int under = intface_glyph_under[index][pixel];
             int glyph = intface_glyph_art[index][pixel];
@@ -2325,21 +2337,23 @@ static void intface_glyphs_open()
         intface_glyph_windows[index] = -1;
         intface_glyph_under[index] = NULL;
         intface_glyph_art[index] = NULL;
-        if (spot->combatOnly && !endWindowOpen) {
+        if ((spot->when == INTFACE_GLYPH_COMBAT && !endWindowOpen)
+            || (spot->when == INTFACE_GLYPH_NO_COMBAT && endWindowOpen)) {
             continue;
         }
 
-        int width = pad_glyph_width(spot->glyph);
+        int width = spot->held ? pad_glyph_held_width(spot->glyph) : pad_glyph_width(spot->glyph);
+        int spotHeight = spot->held ? pad_glyph_held_height() : height;
         int x = spot->x - width / 2;
-        int y = spot->y - height / 2;
-        if (x < 0 || y < 0 || x + width > INTERFACE_BAR_WIDTH || y + height > INTERFACE_BAR_HEIGHT) {
+        int y = spot->y - spotHeight / 2;
+        if (x < 0 || y < 0 || x + width > INTERFACE_BAR_WIDTH || y + spotHeight > INTERFACE_BAR_HEIGHT) {
             continue;
         }
 
-        unsigned char* under = (unsigned char*)mem_malloc(width * height);
-        unsigned char* art = (unsigned char*)mem_malloc(width * height);
+        unsigned char* under = (unsigned char*)mem_malloc(width * spotHeight);
+        unsigned char* art = (unsigned char*)mem_malloc(width * spotHeight);
         int win = under != NULL && art != NULL
-            ? win_add(barRect.ulx + x, barRect.uly + y, width, height, 0, WINDOW_MOVE_ON_TOP)
+            ? win_add(barRect.ulx + x, barRect.uly + y, width, spotHeight, 0, WINDOW_MOVE_ON_TOP)
             : -1;
         if (win == -1) {
             mem_free(under);
@@ -2347,14 +2361,19 @@ static void intface_glyphs_open()
             continue;
         }
 
-        buf_to_buf(interfaceBuffer + INTERFACE_BAR_WIDTH * y + x, width, height, INTERFACE_BAR_WIDTH, under, width);
-        memset(art, 0, width * height);
-        pad_glyph_draw(art, width, width, height, 0, 0, spot->glyph);
+        buf_to_buf(interfaceBuffer + INTERFACE_BAR_WIDTH * y + x, width, spotHeight, INTERFACE_BAR_WIDTH, under, width);
+        memset(art, 0, width * spotHeight);
+        if (spot->held) {
+            pad_glyph_draw_held(art, width, width, spotHeight, 0, 0, spot->glyph);
+        } else {
+            pad_glyph_draw(art, width, width, spotHeight, 0, 0, spot->glyph);
+        }
 
         intface_glyph_windows[index] = win;
         intface_glyph_under[index] = under;
         intface_glyph_art[index] = art;
         intface_glyph_w[index] = width;
+        intface_glyph_h[index] = spotHeight;
     }
     intface_glyphs_shown = true;
     intface_glyph_step = -1;

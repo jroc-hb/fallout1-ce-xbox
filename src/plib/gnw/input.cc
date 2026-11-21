@@ -1,4 +1,5 @@
 #include "plib/gnw/input.h"
+#include "plib/gnw/padnav.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -229,6 +230,11 @@ void process_bk()
     if (vcr_update() != 3) {
         mouse_info();
     }
+
+#ifdef NXDK
+    // D-pad menu navigation: focus frame, pointer hidden in pad mode.
+    padnav_update();
+#endif
 
     v1 = win_check_all_buttons();
     if (v1 != -1) {

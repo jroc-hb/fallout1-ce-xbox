@@ -1,4 +1,5 @@
 #include "plib/gnw/mouse.h"
+#include "plib/gnw/padnav.h"
 
 #include "plib/color/color.h"
 #include "plib/gnw/dxinput.h"
@@ -726,7 +727,15 @@ void warp_mouse_to_button(int button)
 {
     int button_x = win_get_button_center_x(button);
     int button_y = win_get_button_center_y(button);
-    debug_printf("warp_mouse_to_button %d at (%d, %d)\n", button, button_x, button_y);
+    // D-pad navigation (padnav): the screen's choice becomes the focus; in
+    // pad mode the pointer just moves there, hidden.
+    padnav_set_focus(button);
+    if (padnav_pad_mode_on()) {
+        // Hide first: moving a visible pointer leaves its image behind.
+        mouse_hide();
+        mouse_set_position(button_x, button_y);
+        return;
+    }
     warp_mouse(button_x, button_y);
 }
 
@@ -735,7 +744,13 @@ void warp_mouse_to_dialogue_option(int button)
 {
     int button_x = win_get_button_top_right_x(button);
     int button_y = win_get_button_top_right_y(button);
-    debug_printf("warp_mouse_to_dialogue_option %d at (%d, %d)\n", button, button_x, button_y);
+    padnav_set_focus(button);
+    if (padnav_pad_mode_on()) {
+        // Hide first: moving a visible pointer leaves its image behind.
+        mouse_hide();
+        mouse_set_position(button_x, button_y);
+        return;
+    }
     warp_mouse(button_x, button_y);
 }
 #endif

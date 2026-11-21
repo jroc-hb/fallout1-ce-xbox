@@ -1,3 +1,4 @@
+#include "game/padkeys.h"
 #include "game/editor.h"
 
 #include <assert.h>
@@ -39,6 +40,14 @@
 #include "plib/gnw/rect.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
+
+#ifdef NXDK
+#include <SDL3/SDL.h>
+
+#include "plib/gnw/gamepad.hpp"
+#include "plib/gnw/mouse.h"
+#include "plib/gnw/padnav.h"
+#endif
 
 namespace fallout {
 
@@ -626,11 +635,513 @@ static unsigned char free_perk;
 static unsigned char first_skill_list;
 
 #ifdef NXDK
-// Button IDs for NXDK arrow navigation (bottom action buttons)
-static int editor_print_btn = -1;
-static int editor_done_btn = -1;
-static int editor_cancel_btn = -1;
-static int editor_nav_state = 0; // 0=Print, 1=Done, 2=Cancel
+// The character editor without the pointer (pad mode, padnav's: the editor
+// window navigates itself). A cursor over the screen's items: moving onto one
+// selects it as a click would (its card on the right, its row in the
+// screen's own highlight colour), A uses it (tag a skill, pick a trait, press
+// a button), left/right change a SPECIAL stat (creation) or a skill (level
+// up), B cancels. Items without a look of their own (buttons, headers, the
+// folder tabs) get padnav's brightened overlay.
+enum EPadKind {
+    EPAD_BUTTON, // value: the event code A sends
+    EPAD_INFO, // value: info_line
+    EPAD_STAT, // value: the stat (= info_line)
+    EPAD_SKILL, // value: the skill
+    EPAD_TRAIT, // value: the trait
+    EPAD_TAB, // value: the folder
+};
+
+typedef struct EPadItem {
+    int x;
+    int y;
+    int width;
+    int height;
+    int kind;
+    int value;
+    bool lit;
+} EPadItem;
+
+#define EPAD_MAX_ITEMS 112
+static EPadItem epad_items[EPAD_MAX_ITEMS];
+static int epad_count = 0;
+static int epad_focus_kind = -1;
+static int epad_focus_value = 0;
+static bool epad_was_pad = false;
+static int epad_presses[SDL_GAMEPAD_BUTTON_COUNT];
+static bool epad_a_was_held = false;
+static bool epad_a_down = false;
+static bool epad_acted = false; // epad_frame returned an action
+
+// The perk window: the d-pad's buttons (padnav filter).
+static int epad_perk_done = -1;
+static int epad_perk_cancel = -1;
+
+static bool epad_perk_filter(int btn)
+{
+    return btn == epad_perk_done || btn == epad_perk_cancel;
+}
+
+// Age/gender windows: d-pad left/right on their DONE (padnav adjust).
+static int epad_adjust_dir = 0;
+
+static void epad_adjust_proc(int btn, int dir)
+{
+    epad_adjust_dir += dir;
+}
+
+static void epad_add(int x, int y, int width, int height, int kind, int value, bool lit)
+{
+    if (epad_count >= EPAD_MAX_ITEMS) {
+        return;
+    }
+    EPadItem* item = &(epad_items[epad_count++]);
+    item->x = x;
+    item->y = y;
+    item->width = width;
+    item->height = height;
+    item->kind = kind;
+    item->value = value;
+    item->lit = lit;
+}
+
+static void epad_build()
+{
+    epad_count = 0;
+
+    int oldFont = text_curr();
+    text_font(101);
+    int lineHeight = text_height() + 1;
+
+    if (glblmode) {
+        int x = NAME_BUTTON_X;
+        epad_add(x, NAME_BUTTON_Y, GInfo[EDITOR_GRAPHIC_NAME_ON].width, GInfo[EDITOR_GRAPHIC_NAME_ON].height, EPAD_BUTTON, NAME_BTN_CODE, true);
+        x += GInfo[EDITOR_GRAPHIC_NAME_ON].width;
+        epad_add(x, NAME_BUTTON_Y, GInfo[EDITOR_GRAPHIC_AGE_ON].width, GInfo[EDITOR_GRAPHIC_AGE_ON].height, EPAD_BUTTON, AGE_BTN_CODE, true);
+        x += GInfo[EDITOR_GRAPHIC_AGE_ON].width;
+        epad_add(x, NAME_BUTTON_Y, GInfo[EDITOR_GRAPHIC_SEX_ON].width, GInfo[EDITOR_GRAPHIC_SEX_ON].height, EPAD_BUTTON, SEX_BTN_CODE, true);
+    }
+
+    // SPECIAL, with their +/- buttons.
+    for (int stat = 0; stat < 7; stat++) {
+        epad_add(19, StatYpos[stat], SPECIAL_STATS_BTN_X + GInfo[EDITOR_GRAPHIC_SLIDER_PLUS_ON].width - 19, 24, EPAD_STAT, stat, false);
+    }
+
+    // Creating a character, only what can be changed is on the cursor's
+    // path (user request); the character screen is all reading, so there
+    // every line can be selected for its description.
+    if (!glblmode) {
+        // Level, experience, next level.
+        for (int row = 0; row < 3; row++) {
+            epad_add(32, 280 + row * lineHeight, 120, lineHeight, EPAD_INFO, 7 + row, false);
+        }
+
+        // Conditions and derived stats.
+        for (int row = 0; row < 8; row++) {
+            epad_add(194, 46 + row * (lineHeight + 2), 116, lineHeight, EPAD_INFO, EDITOR_HIT_POINTS + row, false);
+        }
+        for (int row = 0; row < EDITOR_DERIVED_STAT_COUNT; row++) {
+            epad_add(194, 179 + row * (lineHeight + 2), 116, lineHeight, EPAD_INFO, EDITOR_FIRST_DERIVED_STAT + row, false);
+        }
+
+        // Skills header, skill points.
+        epad_add(376, 5, 223, 20, EPAD_INFO, 80, true);
+        epad_add(396, 228, 171, 25, EPAD_INFO, 79, true);
+    }
+
+    for (int skill = 0; skill < SKILL_COUNT; skill++) {
+        epad_add(376, 27 + skill * lineHeight, 224, lineHeight, EPAD_SKILL, skill, false);
+    }
+
+    if (glblmode) {
+        // Optional traits: two columns of eight.
+        double step = text_height() + 3 + 0.56;
+        for (int trait = 0; trait < TRAIT_COUNT; trait++) {
+            int column = trait / 8;
+            int y = (int)(353 + (trait % 8) * step);
+            epad_add(column == 0 ? 47 : 199, y, 145, lineHeight, EPAD_TRAIT, trait, false);
+        }
+    } else {
+        // The folder tabs (FldrButton's x ranges) and the open folder's rows.
+        int tabHeight = 30;
+        int folderRight = 11 + GInfo[EDITOR_GRAPHIC_FOLDER_MASK].width;
+        epad_add(11, 327, 100, tabHeight, EPAD_TAB, EDITOR_FOLDER_PERKS, true);
+        epad_add(111, 327, 97, tabHeight, EPAD_TAB, EDITOR_FOLDER_KARMA, true);
+        epad_add(208, 327, folderRight - 208, tabHeight, EPAD_TAB, EDITOR_FOLDER_KILLS, true);
+
+        switch (folder) {
+        case EDITOR_FOLDER_PERKS: {
+            int perks = PerkCount();
+            if (perks > 7) {
+                perks = 7;
+            }
+            for (int row = 0; row < perks; row++) {
+                epad_add(34, 364 + row * lineHeight, 280, lineHeight, EPAD_INFO, 10 + row, false);
+            }
+            for (int index = 0; index < 2; index++) {
+                if (temp_trait[index] != -1) {
+                    epad_add(34, 362 + (8 + index) * lineHeight, 280, lineHeight, EPAD_INFO, 18 + index, false);
+                }
+            }
+            break;
+        }
+        case EDITOR_FOLDER_KARMA:
+            for (int row = 0; row < karma_count && row < 10; row++) {
+                epad_add(34, 362 + row * lineHeight, 280, lineHeight, EPAD_INFO, 10 + row, false);
+            }
+            break;
+        case EDITOR_FOLDER_KILLS:
+            for (int row = 0; row < kills_count && row < 20; row++) {
+                epad_add(row < 10 ? 34 : 191, 362 + (row % 10) * lineHeight, 140, lineHeight, EPAD_INFO, 10 + row, false);
+            }
+            break;
+        }
+    }
+
+    // OPTIONS (PRINT when levelling up), DONE, CANCEL: the plates the red
+    // buttons sit on, labels included.
+    epad_add(343 - 6, 454 - 4, 104, 24, EPAD_BUTTON, 501, true);
+    epad_add(455 - 6, 454 - 4, 96, 24, EPAD_BUTTON, 500, true);
+    epad_add(552 - 6, 454 - 4, 86, 24, EPAD_BUTTON, 502, true);
+
+    text_font(oldFont);
+}
+
+static int epad_index(int kind, int value)
+{
+    for (int index = 0; index < epad_count; index++) {
+        if (epad_items[index].kind == kind && epad_items[index].value == value) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+// The item that stands for the current selection (info_line), if any.
+static int epad_index_for_info_line()
+{
+    if (info_line >= 0 && info_line < 7) {
+        return epad_index(EPAD_STAT, info_line);
+    }
+    if (info_line >= EDITOR_FIRST_SKILL && info_line < EDITOR_FIRST_SKILL + SKILL_COUNT) {
+        return epad_index(EPAD_SKILL, info_line - EDITOR_FIRST_SKILL);
+    }
+    if (info_line >= EDITOR_FIRST_TRAIT && info_line < EDITOR_FIRST_TRAIT + TRAIT_COUNT) {
+        return epad_index(EPAD_TRAIT, info_line - EDITOR_FIRST_TRAIT);
+    }
+    if (info_line >= 40 && info_line <= 42) {
+        return epad_index(EPAD_TAB, folder);
+    }
+    return epad_index(EPAD_INFO, info_line);
+}
+
+static int epad_index_at(int x, int y)
+{
+    for (int index = 0; index < epad_count; index++) {
+        const EPadItem* item = &(epad_items[index]);
+        if (x >= item->x && x < item->x + item->width && y >= item->y && y < item->y + item->height) {
+            return index;
+        }
+    }
+    return -1;
+}
+
+static void epad_redraw()
+{
+    ListTraits();
+    ListSkills(0);
+    PrintLevelWin();
+    DrawFolder();
+    PrintBasicStat(RENDER_ALL_STATS, false, 0);
+    ListDrvdStats();
+    DrawInfoWin();
+    win_draw(edit_win);
+}
+
+// The focus moved onto an item: select it as a click would.
+static void epad_select(const EPadItem* item)
+{
+    epad_focus_kind = item->kind;
+    epad_focus_value = item->value;
+
+    switch (item->kind) {
+    case EPAD_BUTTON:
+        return;
+    case EPAD_TAB:
+        if (folder != item->value) {
+            gsound_play_sfx_file("ib3p1xx1");
+            folder = item->value;
+        }
+        info_line = item->value == EDITOR_FOLDER_PERKS ? 40 : (item->value == EDITOR_FOLDER_KILLS ? 41 : 42);
+        break;
+    case EPAD_SKILL:
+        skill_cursor = item->value;
+        info_line = EDITOR_FIRST_SKILL + item->value;
+        break;
+    case EPAD_TRAIT:
+        info_line = EDITOR_FIRST_TRAIT + item->value;
+        break;
+    default:
+        info_line = item->value;
+        break;
+    }
+
+    epad_redraw();
+}
+
+// The nearest item from `from` in that direction: within 45 degrees first
+// (distance along + 3 x across, rows that overlap count as 0 across), else
+// anything on that side.
+static int epad_find(int from, int dx, int dy)
+{
+    const EPadItem* origin = &(epad_items[from]);
+    int originX = origin->x + origin->width / 2;
+    int originY = origin->y + origin->height / 2;
+
+    for (int pass = 0; pass < 2; pass++) {
+        int best = -1;
+        int bestScore = 0;
+        for (int index = 0; index < epad_count; index++) {
+            if (index == from) {
+                continue;
+            }
+            const EPadItem* item = &(epad_items[index]);
+            int centerX = item->x + item->width / 2;
+            int centerY = item->y + item->height / 2;
+
+            int along;
+            int across;
+            if (dx != 0) {
+                along = (centerX - originX) * dx;
+                bool overlap = item->y < origin->y + origin->height && origin->y < item->y + item->height;
+                across = overlap ? 0 : abs(centerY - originY);
+            } else {
+                along = (centerY - originY) * dy;
+                bool overlap = item->x < origin->x + origin->width && origin->x < item->x + item->width;
+                across = overlap ? 0 : abs(centerX - originX);
+            }
+
+            // Past the item's edge that way, not just its centre.
+            bool beyond = dx < 0 ? centerX < origin->x
+                : dx > 0       ? centerX >= origin->x + origin->width
+                : dy < 0       ? centerY < origin->y
+                               : centerY >= origin->y + origin->height;
+            if (along <= 0 || !beyond) {
+                continue;
+            }
+            if (pass == 0 && across > along) {
+                continue;
+            }
+
+            int score = along + 3 * across;
+            if (best == -1 || score < bestScore) {
+                best = index;
+                bestScore = score;
+            }
+        }
+        if (best != -1) {
+            return best;
+        }
+    }
+    return -1;
+}
+
+// One step of a SPECIAL stat (creation), as one click of its +/- button.
+static void epad_stat_step(int stat, int dir)
+{
+    int savedPoints = character_points;
+    int previousValue;
+    bool changed;
+
+    if (dir > 0) {
+        previousValue = stat_get_base(obj_dude, stat) + stat_get_bonus(obj_dude, stat);
+        changed = character_points > 0 && previousValue < 10 && inc_stat(obj_dude, stat) == 0;
+        if (changed) {
+            character_points--;
+        }
+    } else {
+        previousValue = stat_level(obj_dude, stat);
+        changed = dec_stat(obj_dude, stat) == 0;
+        if (changed) {
+            character_points++;
+        }
+    }
+
+    gsound_play_sfx_file(changed ? "ib1p1xx1" : "iisxxxx1");
+
+    info_line = stat;
+    PrintBasicStat(stat, changed ? ANIMATE : 0, previousValue);
+    PrintBigNum(126, 282, changed ? ANIMATE : 0, character_points, savedPoints, edit_win);
+    stat_recalc_derived(obj_dude);
+    ListDrvdStats();
+    ListSkills(0);
+    DrawInfoWin();
+    win_draw(edit_win);
+}
+
+// Forget presses made elsewhere (a window an action opened).
+static void epad_sync()
+{
+    for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT; button++) {
+        epad_presses[button] = GamepadButtonPresses(button);
+    }
+    epad_a_was_held = GamepadClickHeld();
+    epad_a_down = false;
+}
+
+static bool epad_pressed(int button)
+{
+    int count = GamepadButtonPresses(button);
+    bool pressed = count != epad_presses[button];
+    epad_presses[button] = count;
+    return pressed;
+}
+
+static void epad_start()
+{
+    padnav_set_window_flags(edit_win, WINDOW_PAD_SELF_NAV);
+    padnav_menu_opened();
+    GamepadSetScreenCapture(true);
+    epad_was_pad = false;
+    epad_focus_kind = -1;
+    epad_sync();
+}
+
+static void epad_end()
+{
+    padnav_hide_area();
+    GamepadSetScreenCapture(false);
+}
+
+// Once per pass of the editor's loop, right after get_input. Returns the key
+// code the loop should handle (-1: nothing).
+static int epad_frame(int keyCode)
+{
+    int dx = 0;
+    int dy = 0;
+    switch (keyCode) {
+    case KEY_ARROW_LEFT:
+        dx = -1;
+        break;
+    case KEY_ARROW_RIGHT:
+        dx = 1;
+        break;
+    case KEY_ARROW_UP:
+        dy = -1;
+        break;
+    case KEY_ARROW_DOWN:
+        dy = 1;
+        break;
+    }
+    bool isArrow = dx != 0 || dy != 0;
+
+    epad_build();
+
+    if (!padnav_pad_mode_on()) {
+        // Pointer mode: the mouse as usual, until the d-pad brings pad mode
+        // back, onto the item under the pointer.
+        if (epad_was_pad) {
+            epad_was_pad = false;
+            padnav_hide_area();
+        }
+        if (!isArrow) {
+            epad_sync();
+            return keyCode;
+        }
+        padnav_set_pad_mode(true);
+        int x;
+        int y;
+        mouseGetPositionInWindow(edit_win, &x, &y);
+        int index = epad_index_at(x, y);
+        if (index != -1) {
+            epad_select(&(epad_items[index]));
+        }
+        keyCode = -1;
+        isArrow = false;
+    }
+
+    if (!epad_was_pad) {
+        epad_was_pad = true;
+        epad_sync();
+    }
+
+    int focus = epad_index(epad_focus_kind, epad_focus_value);
+    if (focus == -1) {
+        focus = epad_index_for_info_line();
+        if (focus == -1) {
+            focus = epad_index(EPAD_STAT, 0);
+        }
+        if (focus != -1) {
+            epad_focus_kind = epad_items[focus].kind;
+            epad_focus_value = epad_items[focus].value;
+        }
+    }
+    if (focus == -1) {
+        return keyCode;
+    }
+
+    int result = keyCode;
+    const EPadItem* item = &(epad_items[focus]);
+
+    if (isArrow) {
+        result = -1;
+        if (dx != 0 && glblmode && item->kind == EPAD_STAT) {
+            epad_stat_step(item->value, dx);
+        } else if (dx != 0 && !glblmode && item->kind == EPAD_SKILL
+            && (stat_pc_get(PC_STAT_UNSPENT_SKILL_POINTS) > 0 || skill_level(obj_dude, item->value) > skillsav[item->value])) {
+            // Points to spend or to take back: SliderBtn moves skill_cursor's
+            // skill a point. (Otherwise left/right just move.)
+            skill_cursor = item->value;
+            result = keyCode;
+        } else {
+            int next = epad_find(focus, dx, dy);
+            if (next != -1) {
+                focus = next;
+                epad_select(&(epad_items[focus]));
+                item = &(epad_items[focus]);
+            }
+        }
+    }
+
+    // A: on release, as a click.
+    bool held = GamepadClickHeld();
+    if (epad_pressed(SDL_GAMEPAD_BUTTON_SOUTH) || (held && !epad_a_was_held)) {
+        epad_a_down = true;
+    }
+    epad_a_was_held = held;
+    if (epad_a_down && !held) {
+        epad_a_down = false;
+        switch (item->kind) {
+        case EPAD_BUTTON:
+            result = item->value;
+            break;
+        case EPAD_SKILL:
+            if (glblmode) {
+                result = 536 + item->value;
+            }
+            break;
+        case EPAD_TRAIT:
+            result = OPTIONAL_TRAITS_BTN_CODE + item->value;
+            break;
+        }
+    }
+
+    // B: cancel, as Escape.
+    if (epad_pressed(SDL_GAMEPAD_BUTTON_EAST)) {
+        result = KEY_ESCAPE;
+    }
+
+    if (result != -1 && (result != keyCode || isArrow)) {
+        // An action may open a window: no highlight over it.
+        epad_acted = true;
+        padnav_hide_area();
+    } else if (item->lit) {
+        padnav_show_area(edit_win, item->x, item->y, item->width, item->height);
+    } else {
+        padnav_hide_area();
+    }
+
+    return result;
+}
 #endif
 
 // 0x42C40C
@@ -669,20 +1180,7 @@ int editor_design(bool isCreationMode)
         int keyCode = get_input();
 
 #ifdef NXDK
-        // NXDK: allow left/right dpad or plus/minus to cycle bottom action buttons
-        if (keyCode == KEY_ARROW_RIGHT || keyCode == KEY_PLUS) {
-            editor_nav_state = (editor_nav_state + 1) % 3;
-            int btn = editor_nav_state == 0 ? editor_print_btn : (editor_nav_state == 1 ? editor_done_btn : editor_cancel_btn);
-            if (btn != -1) {
-                warp_mouse_to_button(btn);
-            }
-        } else if (keyCode == KEY_ARROW_LEFT || keyCode == KEY_MINUS) {
-            editor_nav_state = (editor_nav_state + 2) % 3;
-            int btn = editor_nav_state == 0 ? editor_print_btn : (editor_nav_state == 1 ? editor_done_btn : editor_cancel_btn);
-            if (btn != -1) {
-                warp_mouse_to_button(btn);
-            }
-        }
+        keyCode = epad_frame(keyCode);
 #endif
 
         bool done = false;
@@ -783,6 +1281,14 @@ int editor_design(bool isCreationMode)
         } else if (keyCode == 390) {
             dump_screen();
         }
+
+#ifdef NXDK
+        if (epad_acted) {
+            // Presses made in a window the action opened were that window's.
+            epad_acted = false;
+            epad_sync();
+        }
+#endif
 
         win_draw(edit_win);
 
@@ -1362,9 +1868,6 @@ static int CharEditStart()
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
-#ifdef NXDK
-        editor_print_btn = btn;
-#endif
     }
 
     btn = win_register_button(
@@ -1383,9 +1886,6 @@ static int CharEditStart()
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
-#ifdef NXDK
-        editor_cancel_btn = btn;
-#endif
     }
 
     btn = win_register_button(
@@ -1404,16 +1904,9 @@ static int CharEditStart()
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
-#ifdef NXDK
-        editor_done_btn = btn;
-#endif
     }
 #ifdef NXDK
-    // Start navigation focused on Done by default
-    editor_nav_state = 1;
-    if (editor_done_btn != -1) {
-        warp_mouse_to_button(editor_done_btn);
-    }
+    epad_start();
 #endif
 
     win_draw(edit_win);
@@ -1425,6 +1918,9 @@ static int CharEditStart()
 // 0x42DA38
 static void CharEditEnd()
 {
+#ifdef NXDK
+    epad_end();
+#endif
     win_delete(edit_win);
 
     for (int index = 0; index < EDITOR_GRAPHIC_COUNT; index++) {
@@ -1515,6 +2011,13 @@ int get_input_str(int win, int cancelKeyCode, char* text, int maxLength, int x, 
 
     beginTextInput();
 
+    // The pad's on-screen keyboard, under the field.
+    {
+        Rect fieldWindowRect;
+        win_get_rect(win, &fieldWindowRect);
+        padkeys_begin(fieldWindowRect.ulx + x, fieldWindowRect.uly + y, nameLength == 0);
+    }
+
     int blinkingCounter = 3;
     bool blink = false;
 
@@ -1524,7 +2027,7 @@ int get_input_str(int win, int cancelKeyCode, char* text, int maxLength, int x, 
 
         frame_time = get_time();
 
-        int keyCode = get_input();
+        int keyCode = padkeys_frame(get_input());
         if (keyCode == cancelKeyCode) {
             rc = 0;
         } else if (keyCode == KEY_RETURN) {
@@ -1578,6 +2081,7 @@ int get_input_str(int win, int cancelKeyCode, char* text, int maxLength, int x, 
         sharedFpsLimiter.throttle();
     }
 
+    padkeys_end();
     endTextInput();
 
     if (rc == 0 || nameLength > 0) {
@@ -2921,12 +3425,7 @@ static int NameWindow()
     text_font(101);
 
     char name[64];
-#ifdef NXDK
-    // Can't type a name on an Xbox controller so we provide a default
-    strcpy(name, "Vault Dweller");
-#else
     strcpy(name, critter_name(obj_dude));
-#endif
 
     if (strcmp(name, "None") == 0) {
         name[0] = '\0';
@@ -3095,6 +3594,14 @@ static int AgeWindow()
         win_register_button_sound_func(prevBtn, gsound_med_butt_press, NULL);
     }
 
+#ifdef NXDK
+    // Pad: DONE has the focus, left/right change the age there.
+    padnav_set_highlight_rect(doneBtn, 13, 40, GInfo[EDITOR_GRAPHIC_DONE_BOX].width, GInfo[EDITOR_GRAPHIC_DONE_BOX].height);
+    padnav_set_adjust(doneBtn, epad_adjust_proc, true);
+    padnav_set_focus(doneBtn);
+    epad_adjust_dir = 0;
+#endif
+
     while (true) {
         sharedFpsLimiter.mark();
 
@@ -3106,11 +3613,21 @@ static int AgeWindow()
 
         convertMouseWheelToArrowKey(&keyCode);
 
+#ifdef NXDK
+        if (epad_adjust_dir != 0) {
+            keyCode = epad_adjust_dir > 0 ? KEY_ARROW_RIGHT : KEY_ARROW_LEFT;
+            epad_adjust_dir = 0;
+        }
+#endif
+
         if (keyCode == KEY_RETURN || keyCode == 500) {
             if (keyCode != 500) {
                 gsound_play_sfx_file("ib1p1xx1");
             }
 
+#ifdef NXDK
+            padnav_set_adjust(doneBtn, NULL);
+#endif
             win_delete(win);
             return 0;
         } else if (keyCode == KEY_ESCAPE || game_user_wants_to_quit != 0) {
@@ -3221,6 +3738,9 @@ static int AgeWindow()
         }
     }
 
+#ifdef NXDK
+    padnav_set_adjust(doneBtn, NULL);
+#endif
     stat_set_base(obj_dude, STAT_AGE, savedAge);
     PrintAgeBig();
     PrintBasicStat(RENDER_ALL_STATS, 0, 0);
@@ -3322,12 +3842,33 @@ static void SexWindow()
     int savedGender = stat_level(obj_dude, STAT_GENDER);
     win_set_button_rest_state(btns[savedGender], 1, 0);
 
+#ifdef NXDK
+    // Pad: DONE has the focus, left/right pick male/female there.
+    padnav_set_highlight_rect(doneBtn, 15, 44, GInfo[EDITOR_GRAPHIC_DONE_BOX].width, GInfo[EDITOR_GRAPHIC_DONE_BOX].height);
+    padnav_set_adjust(doneBtn, epad_adjust_proc, true);
+    padnav_set_focus(doneBtn);
+    epad_adjust_dir = 0;
+#endif
+
     while (true) {
         sharedFpsLimiter.mark();
 
         frame_time = get_time();
 
         int eventCode = get_input();
+
+#ifdef NXDK
+        if (epad_adjust_dir != 0) {
+            int gender = epad_adjust_dir > 0 ? 1 : 0;
+            epad_adjust_dir = 0;
+            if (gender != stat_level(obj_dude, STAT_GENDER)) {
+                gsound_play_sfx_file("ib1p1xx1");
+                win_set_button_rest_state(btns[gender], 1, 0);
+                win_set_button_rest_state(btns[1 - gender], 0, 0);
+                eventCode = 501 + gender;
+            }
+        }
+#endif
 
         if (eventCode == 500) {
             break;
@@ -3361,6 +3902,9 @@ static void SexWindow()
         sharedFpsLimiter.throttle();
     }
 
+#ifdef NXDK
+    padnav_set_adjust(doneBtn, NULL);
+#endif
     PrintGender();
     win_delete(win);
 }
@@ -5375,6 +5919,10 @@ static int perks_dialog()
 
     int btn;
 
+#ifdef NXDK
+    epad_perk_done = -1;
+    epad_perk_cancel = -1;
+#endif
     btn = win_register_button(pwin,
         48,
         186,
@@ -5390,6 +5938,9 @@ static int perks_dialog()
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+        epad_perk_done = btn;
+#endif
     }
 
     btn = win_register_button(pwin,
@@ -5407,6 +5958,9 @@ static int perks_dialog()
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+        epad_perk_cancel = btn;
+#endif
     }
 
     btn = win_register_button(pwin,
@@ -5456,6 +6010,19 @@ static int perks_dialog()
         NULL,
         NULL,
         BUTTON_FLAG_TRANSPARENT);
+
+#ifdef NXDK
+    // Pad: only DONE and CANCEL are buttons for the d-pad, so up/down reach
+    // the list (InputPDLoop's arrow keys); DONE has the focus.
+    padnav_set_filter(pwin, epad_perk_filter);
+    if (epad_perk_done != -1) {
+        padnav_set_highlight_rect(epad_perk_done, 40, 181, 80, 25);
+        padnav_set_focus(epad_perk_done);
+    }
+    if (epad_perk_cancel != -1) {
+        padnav_set_highlight_rect(epad_perk_cancel, 145, 181, 90, 25);
+    }
+#endif
 
     text_font(103);
 

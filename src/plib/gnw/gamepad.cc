@@ -6,6 +6,7 @@
 #include "plib/gnw/button.h"
 #include "plib/gnw/debug.h"
 #include "plib/gnw/gamepad.hpp"
+#include "plib/gnw/padnav.h"
 #include "plib/gnw/mouse.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/dxinput.h"
@@ -16,6 +17,7 @@
 #include "game/gconfig.h"
 #include "game/gmouse.h"
 #include "game/map.h"
+#include "game/padglyph.h"
 #include "game/stickwalk.h"
 
 // Based on glebm's initial mouse support PR https://github.com/alexbatalov/fallout1-ce/pull/118
@@ -63,6 +65,15 @@ static bool gCameraStickPointer       = false;
 // A pad-driven menu (the skill wheel) reads A and the pointer stick itself:
 // no clicks, no pointer movement.
 static bool gUiCapture                = false;
+// GamepadSetScreenCapture: the inventory screens read the face buttons.
+static bool gScreenCapture            = false;
+static bool gTextCapture              = false;
+static GamepadPanProc* gPanHandler = NULL;
+static int gButtonPresses[SDL_GAMEPAD_BUTTON_COUNT];
+static bool gButtonHeld[SDL_GAMEPAD_BUTTON_COUNT];
+// The down was captured, so its up is too (and only then: a key pressed
+// before the capture must still be released).
+static bool gButtonCaptured[SDL_GAMEPAD_BUTTON_COUNT];
 // Rumble strength 0-100, 0 = off (XBOX OPTS "RUMBLE", [control] rumble).
 static int gRumbleStrength            = 100;
 // A short buzz when the pointer moves onto something clickable (XBOX OPTS
@@ -305,10 +316,19 @@ static bool gXHoldSent = false;
 static Uint64 gXDownTicks = 0;
 // White: tap ends the turn (Space), holding ends combat (Enter).
 static bool gWhiteDown = false;
+// B pressed as "back" in a pad menu: the scancode it sent (0: none), -1 when
+// it was a right click / Look.
+static int gBackScancode = -1;
 static bool gWhiteHoldSent = false;
 static Uint64 gWhiteDownTicks = 0;
 
 static constexpr Uint64 kButtonHoldMs = 400;
+
+// BACK: a tap opens the menus wheel (F11, on release), a hold the quick wheel
+// (F8).
+static bool gBackDown = false;
+static bool gBackHoldSent = false;
+static Uint64 gBackDownTicks = 0;
 
 // A key press and release.
 static void TapKey(SDL_Scancode scancode)
@@ -324,10 +344,14 @@ static void ProcessHeldButtons()
 {
     const Uint64 now = SDL_GetTicks();
     if (gXCombat && !gXHoldSent && now - gXDownTicks >= kButtonHoldMs) {
-        TapKey(SDL_SCANCODE_I);
+        TapKey(SDL_SCANCODE_R); // held in combat: reload
         gXHoldSent = true;
     }
-    if (gWhiteDown && !gWhiteHoldSent && now - gWhiteDownTicks >= kButtonHoldMs) {
+    if (gBackDown && !gBackHoldSent && now - gBackDownTicks >= kButtonHoldMs) {
+        TapKey(SDL_SCANCODE_F8); // held: quick wheel
+        gBackHoldSent = true;
+    }
+    if (gWhiteDown && !gWhiteHoldSent && isInCombat() && now - gWhiteDownTicks >= kButtonHoldMs) {
         TapKey(SDL_SCANCODE_KP_ENTER);
         gWhiteHoldSent = true;
     }
@@ -344,6 +368,7 @@ void GamepadToggleStickWalk()
         ScaleRightJoystick();
     }
 
+    padnav_set_pad_by_default(gStickWalk);
     config_set_value(&game_config, GAME_CONFIG_CONTROL_KEY, GAME_CONFIG_STICK_WALK_KEY, gStickWalk ? 1 : 0);
     gconfig_save();
 
@@ -355,9 +380,35 @@ void GamepadToggleStickWalk()
     debug_printf("Gamepad: stick_walk=%d\n", gStickWalk ? 1 : 0);
 }
 
+// Face buttons a screen capture (GamepadSetScreenCapture) takes.
+static bool IsScreenCaptureButton(int button)
+{
+    switch (button) {
+    case SDL_GAMEPAD_BUTTON_EAST:
+    case SDL_GAMEPAD_BUTTON_WEST:
+    case SDL_GAMEPAD_BUTTON_NORTH:
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:
+        return true;
+    }
+    return false;
+}
+
 void HandleControllerButtonUp(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
+
+    int button = event.gbutton.button;
+    if (button >= 0 && button < SDL_GAMEPAD_BUTTON_COUNT) {
+        gButtonHeld[button] = false;
+        if (button == SDL_GAMEPAD_BUTTON_SOUTH) {
+            gAButtonHeld = false; // also when captured: it mustn't stay "held"
+        }
+        if (gButtonCaptured[button]) {
+            gButtonCaptured[button] = false;
+            return;
+        }
+    }
 
     // Stick clicks go by the physical stick (see HandleControllerButtonDown).
     if (event.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
@@ -377,14 +428,21 @@ void HandleControllerButtonUp(const SDL_Event& event)
         gAButtonHeld = false;
         break;
 
-    case SDL_GAMEPAD_BUTTON_EAST: // B: right click (or Look, see down)
+    case SDL_GAMEPAD_BUTTON_EAST: // B: right click (or Look / back, see down)
+        if (gBackScancode != -1) {
+            if (gBackScancode != 0) {
+                simulatedKeyboardKey = {(SDL_Scancode)gBackScancode, 0};
+                GNW95_process_key(&simulatedKeyboardKey);
+            }
+            gBackScancode = -1;
+        }
         gGamepadRightClick = 0;
         break;
 
-    case SDL_GAMEPAD_BUTTON_WEST: // X: inventory, or in combat reload / hold inventory
+    case SDL_GAMEPAD_BUTTON_WEST: // X: inventory; in combat held: reload
         if (gXCombat) {
             if (!gXHoldSent) {
-                TapKey(SDL_SCANCODE_R);
+                TapKey(SDL_SCANCODE_I);
             }
             gXCombat = false;
         } else {
@@ -398,9 +456,11 @@ void HandleControllerButtonUp(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_GAMEPAD_BUTTON_BACK: // Back: menus wheel (F11)
-        simulatedKeyboardKey = {SDL_SCANCODE_F11, 0};
-        GNW95_process_key(&simulatedKeyboardKey);
+    case SDL_GAMEPAD_BUTTON_BACK: // Back: tap menus wheel (F11), hold quick wheel (F8)
+        if (gBackDown && !gBackHoldSent) {
+            TapKey(SDL_SCANCODE_F11);
+        }
+        gBackDown = false;
         break;
 
     case SDL_GAMEPAD_BUTTON_START: // Start: options (Esc)
@@ -413,9 +473,13 @@ void HandleControllerButtonUp(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: // White: end turn, hold: end combat
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: // White: end turn, hold: end combat; outside combat: start it
         if (gWhiteDown && !gWhiteHoldSent) {
-            TapKey(SDL_SCANCODE_SPACE);
+            if (isInCombat()) {
+                TapKey(SDL_SCANCODE_SPACE);
+            } else {
+                stick_walk_request_combat();
+            }
         }
         gWhiteDown = false;
         break;
@@ -476,6 +540,17 @@ void HandleControllerButtonDown(const SDL_Event& event)
 {
     KeyboardData simulatedKeyboardKey = {0, 0};
 
+    int button = event.gbutton.button;
+    if (button >= 0 && button < SDL_GAMEPAD_BUTTON_COUNT) {
+        gButtonHeld[button] = true;
+        gButtonPresses[button]++;
+        if ((IsScreenCaptureButton(button) && GamepadScreenCaptureActive())
+            || (gTextCapture && button != SDL_GAMEPAD_BUTTON_LEFT_STICK && button != SDL_GAMEPAD_BUTTON_RIGHT_STICK)) {
+            gButtonCaptured[button] = true;
+            return;
+        }
+    }
+
     // Stick clicks go by the physical stick, whatever the swap:
     // - left: toggles walk mode (in combat: centers the camera);
     // - right: the skill wheel.
@@ -504,14 +579,21 @@ void HandleControllerButtonDown(const SDL_Event& event)
         // A pad menu (the skill wheel) reads B itself; with the walk-mode
         // pointer hidden, B examines the highlighted object instead (the
         // right click only switches the hidden cursor's mode).
-        if (!gUiCapture && gmouse_walk_pointer_hidden()) {
+        // In a menu with the pointer hidden (pad navigation), B is back:
+        // Escape, or the window's own back key.
+        if (!gUiCapture && (gBackScancode = padnav_back_key()) != -1) {
+            if (gBackScancode != 0) {
+                simulatedKeyboardKey = {(SDL_Scancode)gBackScancode, 1};
+                GNW95_process_key(&simulatedKeyboardKey);
+            }
+        } else if (!gUiCapture && gmouse_walk_pointer_hidden()) {
             stick_walk_request_look();
         } else {
             gGamepadRightClick = 1;
         }
         break;
 
-    case SDL_GAMEPAD_BUTTON_WEST: // X: inventory, or in combat reload / hold inventory
+    case SDL_GAMEPAD_BUTTON_WEST: // X: inventory; in combat tap: inventory (on release), hold: reload
         if (isInCombat() && intface_is_enabled()) {
             gXCombat = true;
             gXHoldSent = false;
@@ -527,9 +609,10 @@ void HandleControllerButtonDown(const SDL_Event& event)
         GNW95_process_key(&simulatedKeyboardKey);
         break;
 
-    case SDL_GAMEPAD_BUTTON_BACK: // Back: menus wheel (F11)
-        simulatedKeyboardKey = {SDL_SCANCODE_F11, 1};
-        GNW95_process_key(&simulatedKeyboardKey);
+    case SDL_GAMEPAD_BUTTON_BACK: // Back: tap menus wheel (F11), hold quick wheel (F8)
+        gBackDown = true;
+        gBackHoldSent = false;
+        gBackDownTicks = SDL_GetTicks();
         break;
 
     case SDL_GAMEPAD_BUTTON_START: // Start: options (Esc)
@@ -567,7 +650,8 @@ void HandleControllerButtonDown(const SDL_Event& event)
                 simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
                 GNW95_process_key(&simulatedKeyboardKey);
             }
-        } else {
+        } else if (!padnav_dpad(0, -1)) {
+            // Menus: padnav moved the focus; otherwise the arrow key.
             simulatedKeyboardKey = {SDL_SCANCODE_UP, 1};
             GNW95_process_key(&simulatedKeyboardKey);
         }
@@ -582,7 +666,8 @@ void HandleControllerButtonDown(const SDL_Event& event)
                 simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
                 GNW95_process_key(&simulatedKeyboardKey);
             }
-        } else {
+        } else if (!padnav_dpad(0, 1)) {
+            // Menus: padnav moved the focus; otherwise the arrow key.
             simulatedKeyboardKey = {SDL_SCANCODE_DOWN, 1};
             GNW95_process_key(&simulatedKeyboardKey);
         }
@@ -597,7 +682,8 @@ void HandleControllerButtonDown(const SDL_Event& event)
                 simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
                 GNW95_process_key(&simulatedKeyboardKey);
             }
-        } else {
+        } else if (!padnav_dpad(-1, 0)) {
+            // Menus: padnav moved the focus; otherwise the arrow key.
             simulatedKeyboardKey = {SDL_SCANCODE_LEFT, 1};
             GNW95_process_key(&simulatedKeyboardKey);
         }
@@ -612,7 +698,8 @@ void HandleControllerButtonDown(const SDL_Event& event)
                 simulatedKeyboardKey = {gLeftTriggerChordKey, 1};
                 GNW95_process_key(&simulatedKeyboardKey);
             }
-        } else {
+        } else if (!padnav_dpad(1, 0)) {
+            // Menus: padnav moved the focus; otherwise the arrow key.
             simulatedKeyboardKey = {SDL_SCANCODE_RIGHT, 1};
             GNW95_process_key(&simulatedKeyboardKey);
         }
@@ -662,6 +749,7 @@ void GamepadInit()
     const bool wasSwapped = SticksSwapped();
     gSwapSticks = swapSticks != 0;
     gStickWalk = stickWalk != 0;
+    padnav_set_pad_by_default(gStickWalk);
     if (SticksSwapped() != wasSwapped) {
         // Drop whatever each stick was holding; new events will come in on
         // the other one.
@@ -805,6 +893,9 @@ void ProcessLeftStick()
         return;
     }
 
+    // Moving the pointer leaves d-pad menu navigation (padnav).
+    padnav_pointer_moved();
+
     // Moving the pointer brings it back if stick walking hid it, on the
     // player.
     if (gmouse_walk_pointer_hidden()) {
@@ -880,6 +971,17 @@ void ProcessRightStick()
     // WALK: outside combat the camera stick walks the player and the camera
     // follows; in combat (or with a window open) it pans as usual.
     gCameraStickPointer = false;
+
+    // A screen scrolling its own view takes the stick.
+    if (gPanHandler != NULL) {
+        remainderX = 0.0f;
+        remainderY = 0.0f;
+        if (rightStickX != 0.0f || rightStickY != 0.0f) {
+            gPanHandler(rightStickX, rightStickY, dt);
+        }
+        return;
+    }
+
     if (!gStickWalk) {
         // The option was turned off while the pointer was hidden.
         gmouse_walk_show_pointer(false);
@@ -931,6 +1033,37 @@ void GamepadSetUiCapture(bool capture)
     gUiCapture = capture;
 }
 
+void GamepadSetTextCapture(bool capture)
+{
+    gTextCapture = capture;
+    gUiCapture = capture;
+}
+
+void GamepadSetPanHandler(GamepadPanProc* proc)
+{
+    gPanHandler = proc;
+}
+
+void GamepadSetScreenCapture(bool capture)
+{
+    gScreenCapture = capture;
+}
+
+bool GamepadScreenCaptureActive()
+{
+    return gScreenCapture && !gUiCapture && padnav_pad_mode_on() && !padnav_active();
+}
+
+int GamepadButtonPresses(int button)
+{
+    return button >= 0 && button < SDL_GAMEPAD_BUTTON_COUNT ? gButtonPresses[button] : 0;
+}
+
+bool GamepadButtonHeld(int button)
+{
+    return button >= 0 && button < SDL_GAMEPAD_BUTTON_COUNT && gButtonHeld[button];
+}
+
 void GamepadGetPhysicalLeftStick(float* x, float* y)
 {
     // leftStick* is the pointer stick, which is the physical right one when
@@ -962,6 +1095,7 @@ void ProcessTriggers()
     // button does what on the HUD.
     gmouse_show_all_update(gLeftTriggerValue >= 0.5f);
     intface_show_pad_glyphs(gLeftTriggerValue);
+    pad_glyph_spots_update(gLeftTriggerValue);
 
     // Minimum analog value to consider the right trigger "engaged".
     const float kDeadzone = 0.05f;
@@ -986,9 +1120,32 @@ void ProcessTriggers()
     static bool menuSent = false;
     static Uint64 pressTicks = 0;
 
+    // A let go: the button padnav pressed is released (that's the click).
+    if (released) {
+        padnav_release();
+    }
+
+    // Menus navigated with the d-pad: A presses the focused button instead
+    // of clicking the hidden pointer.
+    if (padnav_active() || (ownPress && clickHeld && !gmouse_walk_pointer_hidden())) {
+        if (pressed && padnav_active()) {
+            padnav_activate();
+            ownPress = true;
+            menuSent = true;
+        }
+        if (released) {
+            ownPress = false;
+        }
+        gGamepadLeftClick = 0;
+        if (!clickHeld) {
+            ownPress = false;
+        }
+        return;
+    }
+
     // A pad menu has A: never a click, and a press that ends it (A on the
     // skill wheel) doesn't become one afterwards.
-    if (gUiCapture) {
+    if (gUiCapture || GamepadScreenCaptureActive()) {
         ownPress = clickHeld;
         menuSent = true;
         gGamepadLeftClick = 0;

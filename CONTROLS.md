@@ -25,8 +25,10 @@ the right stick and the left stick pans the camera.
 - **Hold LT** to show a controller button icon on every interface bar button that has a
   shortcut (they fade in as you squeeze the trigger): Y, X, START (options), Black (item mode), RS (Skilldex: the right stick click
   opens the skill wheel), BACK (map, character and Pip-Boy are in the menus wheel), and White
-  by END TURN / END COMBAT in combat. They go away when you let go. Holding LT also outlines
-  everything usable on the map.
+  on the combat panel (start combat; in combat END TURN / END COMBAT, and X on the weapon for
+  reload). A **HOLD** tag under an icon means that action needs the button held down (a tap
+  does the other thing shown). They go away when you let go. Holding LT also outlines everything usable on the map.
+  In conversations LT shows **Y** on BARTER, and when bartering **Y** on OFFER and **B** on TALK.
 - In **walk mode**, the label over the highlighted object starts with **A**
   (e.g. **(A)** Talk: Slummer).
 - The **wheels** show **(A)** next to what choosing does and **(B)** Close.
@@ -39,16 +41,16 @@ the right stick and the left stick pans the camera.
 | **Right stick** | Shows the pointer and moves it | Camera (pointer if swapped) | Pointer in walk mode; otherwise as in pointer mode |
 | **A** or **RT** | Use the highlighted object. Hold: its action menu | Click. Hold: action menu | Click (attack, move) |
 | **B** | Look at the highlighted object | Right click (change cursor type) | Right click (change cursor type) |
-| **X** | Inventory | Inventory | Tap: reload. Hold: inventory |
+| **X** | Inventory | Inventory | Tap: inventory. Hold: reload |
 | **Y** | Swap hands | Swap hands | Swap hands |
 | **Black** | Change weapon mode | Change weapon mode | Change weapon mode (single, burst, aimed, reload) |
-| **White** | — | — | Tap: end turn. Hold: end combat |
+| **White** | Start combat (aimed at the highlighted character) | Start combat | Tap: end turn. Hold: end combat |
 | **LT** (hold) | Outline everything usable on screen | Slow, precise pointer + outline everything usable | Slow, precise pointer + outline everything usable |
 | **LT + d-pad** | Skill shortcuts (below) | Skill shortcuts | Skill shortcuts |
 | **D-pad** | Switch the highlight between nearby objects | Jump the pointer to the next object in that direction | Jump the pointer to the next character in that direction |
 | **Left stick click** | Switch to pointer mode | Switch to walk mode | Centre the camera on your character |
 | **Right stick click** | Skill wheel | Skill wheel | Skill wheel |
-| **Back** | Menus wheel | Menus wheel | Menus wheel |
+| **Back** | Tap: menus wheel. Hold: quick wheel | Tap: menus wheel. Hold: quick wheel | Tap: menus wheel. Hold: quick wheel |
 | **Start** | Options menu | Options menu | Options menu |
 
 "Tap" means a quick press. "Hold" means keeping the button down for a moment (under half a
@@ -70,8 +72,8 @@ second).
 - **Touch the right stick** to bring the pointer back, for example to click something far
   away. It appears just in front of your character, and A clicks normally again until you
   walk.
-- In conversations, the inventory and other menus, **both sticks move the pointer** and the
-  camera stays still.
+- When the pointer is showing in conversations, the inventory and other menus, **both sticks
+  move it** and the camera stays still.
 
 ## The wheels
 
@@ -115,14 +117,34 @@ skill (for diagonals, press both directions).
 | Left | Load game |
 | Up-left | Save game |
 
+### Quick wheel (hold Back)
+
+Shortcuts that would otherwise take a trip through a menu. It opens on the entry you used
+last, so repeating one (another heal) is just hold **Back**, **A**.
+
+| Position | Entry | What it does |
+|---|---|---|
+| Up | Quick save | Saves to the quick-save slot (the first time, you pick the slot) |
+| Up-right | Quick load | Loads the quick save, after asking |
+| Right | Heal | Uses your best healing item on yourself: a stimpak, healing powder, or a super stimpak when you're badly hurt. Shows how many you carry. Costs the same AP as opening the inventory in combat |
+| Down-right | Reload | Reloads the weapon in your active hand |
+| Down | Sneak | Sneak on/off |
+| Down-left | Walk mode | Walk mode on/off (same as clicking the left stick) |
+| Left | Rest | Opens the Pip-Boy's alarm clock (not in combat) |
+| Up-left | Center view | Centres the camera on your character |
+
 ## Combat
 
 Combat is turn-based and uses the pointer in both modes: aim with the pointer stick and press
 **A** or **RT** to attack the enemy under it, or to move to a spot.
 
+To **start a fight**, tap **White**. In walk mode, with a character highlighted, the crosshair
+lands on them when your turn begins, so **A** attacks straight away.
+
 - **D-pad**: jump the pointer to the next character in that direction.
 - **B**: change the cursor type (move, attack, look).
-- **X (tap)**: reload the weapon in your active hand. This costs action points as usual.
+- **X (hold)**: reload the weapon in your active hand. This costs action points as usual.
+  A tap opens the inventory, as outside combat.
 - **Black**: change weapon mode, for example single shot, burst or aimed shot.
 - **Y**: swap hands.
 - **White (tap)**: end your turn. **White (hold)**: end combat when no enemies are left.
@@ -130,9 +152,96 @@ Combat is turn-based and uses the pointer in both modes: aim with the pointer st
 
 ## Menus and conversations
 
-The pointer works everywhere: **A** clicks and **B** right-clicks. In conversations, **Y**
-opens Barter. In XBOX OPTS, the d-pad moves between settings and changes them, **Start**
-applies and **Back** cancels. **Start** also backs out of the character selection screen.
+Menus are played with the **d-pad**, without the pointer:
+
+- The selected button is **highlighted** the way Fallout highlights things under the mouse
+  (dialogue replies turn yellow; buttons without a hover look light up). The **d-pad** moves
+  the selection to the next button in that direction and **A** (or RT) presses it.
+- **B** goes back: it closes or cancels the screen (Pip-Boy, character screen, Preferences,
+  Load/Save, message boxes and so on). On the main menu it does nothing.
+- **Sliders** (e.g. the volume sliders in Preferences): select one, then **left/right** change
+  it.
+- **Lists** such as the save slots: **up/down** move through the list when there's no button
+  in that direction.
+- **Want the pointer?** Move the right stick (or whichever stick is the pointer). The
+  pointer appears on the selected button. Press the **d-pad** to go back.
+- With **walk mode off** (the PC-like layout), menus start with the pointer; the d-pad switches
+  to the highlight.
+
+With the pointer showing, **B** right-clicks. In conversations, **Y** opens Barter. In XBOX OPTS, the d-pad moves
+between settings and changes them, **Start** applies and **Back** or **B** cancels. **Start** also backs
+out of the character selection screen.
+
+## Inventory, looting and bartering
+
+These screens also work without the pointer: the **d-pad** moves a highlight between the item
+slots (up/down past the end of a list scrolls it), and the highlighted item is described in the
+inventory's info panel (when bartering, in the conversation box).
+
+| Button | Inventory | Looting | Bartering |
+|---|---|---|---|
+| **A** (tap) | Pick the item up; move it with the d-pad and press **A** again to put it down (on a hand, the armor slot, or back in the list) | Move the item to the other side | Move the item onto the offer table, or back |
+| **A** (hold) | The item's menu (look, use, drop, unload): pick with the d-pad, let go of A | Same | Same |
+| **X** | Use the item (drink, inject, read...) | Take all | — |
+| **Y** | Equip it (armor, or the active hand); on a hand or the armor: take it off | — | Offer the trade |
+| **B** | Close (while carrying: put the item back) | Done | Back to talking |
+| **Black / White** | Page up / down the list | Same | Same |
+
+The inventory and loot screens show the main buttons at the bottom. The quantity window (for
+stacks and caps) is a menu like any other: it opens on **DONE**, the d-pad moves between its
+buttons, **A** presses (**ALL**, **+**/**-**, **DONE**), **B** cancels. Moving the pointer stick brings back the pointer (then the
+inventory works as on PC, and **X** closes it); the d-pad returns to the highlight.
+
+## World map and town maps
+
+The town list and the TOWN/WORLD switch work with the d-pad like any menu (unknown towns are
+skipped). On a town map, the d-pad moves between its entrances and **A** travels there.
+
+On the world map:
+- The **camera stick** scrolls the map.
+- To travel anywhere else, move the **pointer stick**: the pointer appears on your marker.
+  Point at the spot and press **A**.
+- **Y** stops and enters the area where you are (as clicking your own marker).
+
+## Pip-Boy
+
+The menu buttons (STATUS, AUTOMAPS, ARCHIVES, CLOSE) and every list line work with the
+d-pad and **A**. On the status page the d-pad picks a quest location (left) or a holodisk
+(right). While reading a holodisk, the bottom line has BACK and MORE as two separate choices.
+- **B** goes back a page (a quest list, a holodisk page, an automap) and closes the Pip-Boy
+  from its main pages.
+- **Y** opens the alarm clock (resting); hold **LT** to see it on the clock.
+
+## Character creation and the character screen
+
+With the pointer hidden, the **d-pad** moves a cursor over the screen: moving onto
+something shows its description on the right card, as clicking it would. When creating a
+character the cursor only stops on things you can change; on the character screen it
+stops on every line, so you can read what each one means.
+
+- **SPECIAL stats** (creating a character): **left/right** take a point off or add one.
+- **Skills**: **A** tags or untags a skill when creating a character. On the character
+  screen, with skill points to spend (or points you spent this time to take back),
+  **left/right** take a point off or add one.
+- **Optional traits**: **A** picks or drops a trait.
+- **Name, Age, Sex** and **OPTIONS / PRINT, DONE, CANCEL**: **A** presses them. Age
+  and Sex open with DONE selected: **left/right** change the age or pick male/female there.
+  **A** closes the window.
+- **Perks, Karma, Kills** (character screen): moving onto a tab opens it, and down
+  goes through its list.
+- **B** cancels (as CANCEL). Moving the pointer stick brings the pointer back; the d-pad
+  hides it again.
+- When you pick a perk, **up/down** go through the list and **A** takes the one shown
+  (DONE).
+
+## Typing text
+
+Wherever the game asks for text (your character's name, a save description, **Tell Me
+About** in conversations, a file name when saving or printing a character), an on-screen
+keyboard appears. **D-pad** picks a key (hold to
+move quickly), **A** types it, **B** deletes (hold to keep deleting), **X** is a space, **Y**
+switches capitals on and off, **START** finishes and **BACK** cancels. SHIFT, SPACE, DEL and
+DONE are also on the keyboard's bottom row. A name starts with a capital letter.
 
 ## Related settings (XBOX OPTS)
 

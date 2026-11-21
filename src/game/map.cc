@@ -41,6 +41,7 @@
 #include "plib/gnw/memory.h"
 #include "plib/gnw/mouse.h"
 #include "plib/gnw/svga.h"
+#include "plib/gnw/padnav.h"
 
 namespace fallout {
 
@@ -284,6 +285,10 @@ int iso_init()
     square_init();
 
     display_win = win_add(0, 0, screenGetWidth(), screenGetHeight() - INTERFACE_BAR_HEIGHT, 256, 10);
+#ifdef NXDK
+    // The d-pad picks targets on the map, not buttons (padnav.cc).
+    padnav_set_window_flags(display_win, WINDOW_NO_PAD_NAV);
+#endif
     if (display_win == -1) {
         debug_printf("win_add failed in iso_init\n");
         return -1;

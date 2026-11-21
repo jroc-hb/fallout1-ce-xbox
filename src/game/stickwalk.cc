@@ -7,6 +7,7 @@
 #include "game/combat.h"
 #include "game/critter.h"
 #include "game/gmouse.h"
+#include "game/intface.h"
 #include "game/map.h"
 #include "game/map_defs.h"
 #include "game/object.h"
@@ -15,6 +16,7 @@
 #include "plib/gnw/gamepad.hpp"
 #include "plib/gnw/gnw.h"
 #include "plib/gnw/input.h"
+#include "plib/gnw/padnav.h"
 #include "plib/gnw/svga.h"
 
 namespace fallout {
@@ -352,6 +354,12 @@ StickWalkResult stick_walk_update(float x, float y, float dt)
         return STICK_WALK_POINTER;
     }
 
+    // Back on the map after a menu navigated with the d-pad: the pointer
+    // stays hidden (it's only shown when the pointer stick is used).
+    if (padnav_pad_mode_on() && !gmouse_walk_pointer_hidden()) {
+        gmouse_walk_hide_pointer();
+    }
+
     const float length = std::sqrt(x * x + y * y);
     if (length > 0.0f) {
         const float dirX = x / length;
@@ -434,8 +442,27 @@ void stick_walk_request_menu()
     sw_menu_pending = true;
 }
 
+static bool sw_combat_pending = false;
+static unsigned int sw_combat_time = 0;
+
+void stick_walk_request_combat()
+{
+    sw_combat_pending = true;
+    sw_combat_time = get_time();
+}
+
 void stick_walk_run_pending()
 {
+    const bool fight = sw_combat_pending && elapsed_time(sw_combat_time) < 500;
+    sw_combat_pending = false;
+    if (fight && !isInCombat() && intface_is_enabled()) {
+        // As the keyboard's A (game.cc), plus the aim.
+        gmouse_combat_aim_prepare();
+        combat(NULL);
+        gmouse_combat_aim_clear();
+        return;
+    }
+
     const bool use = sw_use_pending;
     const bool menu = sw_menu_pending;
     const bool look = sw_look_pending;

@@ -1,4 +1,5 @@
 #include "plib/gnw/gnw.h"
+#include "plib/gnw/padnav.h"
 
 #include <algorithm>
 
@@ -248,6 +249,19 @@ void win_exit(void)
     }
 }
 
+#ifdef NXDK
+// CE: For padnav.cc, the windows bottom to top.
+int GNW_window_count()
+{
+    return num_windows;
+}
+
+Window* GNW_window_at(int index)
+{
+    return index >= 0 && index < num_windows ? window[index] : NULL;
+}
+#endif
+
 // 0x4C22F8
 int win_add(int x, int y, int width, int height, int color, int flags)
 {
@@ -367,6 +381,13 @@ void win_delete(int win)
     if (w == NULL) {
         return;
     }
+
+#ifdef NXDK
+    // The highlight may be a copy of this window's pixels (padnav.cc).
+    if ((w->flags & WINDOW_PAD_OVERLAY) == 0) {
+        padnav_window_changed(win);
+    }
+#endif
 
     Rect rect;
     rectCopy(&rect, &(w->rect));

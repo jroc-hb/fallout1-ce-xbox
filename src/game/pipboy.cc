@@ -35,6 +35,11 @@
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
 
+#ifdef NXDK
+#include "game/padglyph.h"
+#include "plib/gnw/padnav.h"
+#endif
+
 namespace fallout {
 
 #define PIPBOY_RAND_MAX 32767
@@ -198,6 +203,10 @@ static void DrawAlrmHitPnts();
 static void NewFuncDsply();
 static void AddHotLines(int start, int count, bool add_back_button);
 static void NixHotLines();
+#ifdef NXDK
+static void AddStatusHotLines(int count);
+static void SplitHoloBackLine();
+#endif
 static bool TimedRest(int hours, int minutes, int kind);
 static bool Check4Health(int a1);
 static bool AddHealth();
@@ -468,6 +477,26 @@ static int holopages;
 // 0x662C2C
 static int HotLines[21];
 
+#ifdef NXDK
+// The status page's rows hold two things side by side (a quest location
+// left of x 429, a holodisk right of it) and the holodisk reader's bottom line
+// BACK (left) and MORE / DONE (right): one button each, the click's x
+// decides. The pad presses a button at its centre, so these are split in two
+// buttons (same event code) the d-pad can pick separately.
+static int HotLinesRight[20];
+static int holo_more_btn = -1;
+
+// The alarm clock sits between the list and the menu buttons, where the
+// d-pad kept landing on it (barely visible) on the way to the menu: it's on
+// Y instead (LT shows it), and off the d-pad's path.
+static int pip_alarm_btn = -1;
+
+static bool pip_pad_filter(int btn)
+{
+    return btn != pip_alarm_btn;
+}
+#endif
+
 // 0x662C80
 static int old_mouse_x;
 
@@ -544,6 +573,13 @@ int pipboy(int intent)
 
         int keyCode = get_input();
 
+#ifdef NXDK
+        // Y (sends B): the alarm clock.
+        if (keyCode == KEY_LOWERCASE_B || keyCode == KEY_UPPERCASE_B) {
+            keyCode = 504;
+        }
+#endif
+
         if (intent == PIPBOY_OPEN_INTENT_REST) {
             keyCode = 504;
             intent = PIPBOY_OPEN_INTENT_UNSPECIFIED;
@@ -563,6 +599,15 @@ int pipboy(int intent)
                 mouseGetPositionInWindow(pip_win, &old_mouse_x, &old_mouse_y);
             }
         }
+
+#ifdef NXDK
+        // B (Escape in pad mode) goes back a level when the page has a back
+        // line (a holodisk turns back a page), and only closes from the top.
+        if (keyCode == KEY_ESCAPE && hot_back_line && padnav_pad_mode_on()) {
+            PipFnctn[crnt_func](crnt_func == 0 && holo_flag && !stat_flag ? 1027 : 1025);
+            keyCode = -1;
+        }
+#endif
 
         if (keyCode == KEY_CTRL_Q || keyCode == KEY_CTRL_X || keyCode == KEY_F10) {
             game_quit_with_confirm();
@@ -620,6 +665,12 @@ static int StartPipboy(int intent)
     bottom_line = PIPBOY_WINDOW_CONTENT_VIEW_HEIGHT / text_height() - 1;
     hot_line_start = 0;
     hot_back_line = 0;
+#ifdef NXDK
+    for (int index = 0; index < 20; index++) {
+        HotLinesRight[index] = -1;
+    }
+    holo_more_btn = -1;
+#endif
 
     if (!message_init(&pipboy_message_file)) {
         return -1;
@@ -686,6 +737,19 @@ static int StartPipboy(int intent)
         win_register_button_sound_func(alarmButton, gsound_med_butt_press, gsound_med_butt_release);
     }
 
+#ifdef NXDK
+    pip_alarm_btn = alarmButton;
+    padnav_set_filter(pip_win, pip_pad_filter);
+    {
+        static PadGlyphSpot spots[1];
+        spots[0].x = 124 + ginfo[PIPBOY_FRM_ALARM_UP].width / 2;
+        spots[0].y = 13 + ginfo[PIPBOY_FRM_ALARM_UP].height / 2;
+        spots[0].glyph = PAD_GLYPH_Y;
+        spots[0].padModeOnly = false;
+        pad_glyph_spots_set(pip_win, spots, 1);
+    }
+#endif
+
     int y = 341;
     int eventCode = 500;
     for (int index = 0; index < 5; index += 1) {
@@ -705,6 +769,10 @@ static int StartPipboy(int intent)
                 BUTTON_FLAG_TRANSPARENT);
             if (btn != -1) {
                 win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+                // The red dot and its label.
+                padnav_set_highlight_rect(btn, 47, y - 4, 122, 23);
+#endif
             }
 
             eventCode += 1;
@@ -994,7 +1062,11 @@ static void PipStatus(int a1)
         holocount = ListHoloDiskTitles(-1);
 
         win_draw_rect(pip_win, &pip_rect);
+#ifdef NXDK
+        AddStatusHotLines(statcount > holocount ? statcount : holocount);
+#else
         AddHotLines(2, statcount + holocount + 1, false);
+#endif
         win_draw(pip_win);
         return;
     }
@@ -1042,6 +1114,9 @@ static void PipStatus(int a1)
                 NixHotLines();
                 ShowHoloDisk();
                 AddHotLines(0, 0, true);
+#ifdef NXDK
+                SplitHoloBackLine();
+#endif
                 holo_flag = 1;
             }
         }
@@ -1995,6 +2070,8 @@ static void AddHotLines(int start, int count, bool add_back_button)
     }
 
     if (add_back_button) {
+        // So NixHotLines removes it (never set before: back lines piled up).
+        hot_back_line = 1;
         HotLines[BACK_BUTTON_INDEX] = win_register_button(pip_win,
             254,
             height * bottom_line + PIPBOY_WINDOW_CONTENT_VIEW_Y,
@@ -2029,9 +2106,68 @@ static void NixHotLines()
         win_delete_button(HotLines[BACK_BUTTON_INDEX]);
     }
 
+#ifdef NXDK
+    for (int index = 0; index < 20; index++) {
+        if (HotLinesRight[index] != -1) {
+            win_delete_button(HotLinesRight[index]);
+            HotLinesRight[index] = -1;
+        }
+    }
+    if (holo_more_btn != -1) {
+        win_delete_button(holo_more_btn);
+        holo_more_btn = -1;
+    }
+#endif
+
     hot_line_count = 0;
     hot_back_line = 0;
 }
+
+#ifdef NXDK
+// The status page's rows as left/right halves: a1 = row (from 1) is a
+// location while it's within statcount, a holodisk within holocount.
+static void AddStatusHotLines(int count)
+{
+    text_font(101);
+    int height = text_height();
+
+    hot_line_start = 2;
+    hot_line_count = count;
+
+    int y = 2 * height + PIPBOY_WINDOW_CONTENT_VIEW_Y;
+    for (int row = 0; row < count && row + 2 < 20; row++) {
+        int index = row + 2;
+        int eventCode = index + 505;
+        int a1 = row + 1;
+
+        HotLines[index] = -1;
+        if (a1 <= statcount) {
+            HotLines[index] = win_register_button(pip_win, 254, y, 429 - 254, height, -1, -1, -1, eventCode, NULL, NULL, NULL, BUTTON_FLAG_TRANSPARENT);
+        }
+        if (a1 <= holocount) {
+            HotLinesRight[index] = win_register_button(pip_win, 430, y, 604 - 430, height, -1, -1, -1, eventCode, NULL, NULL, NULL, BUTTON_FLAG_TRANSPARENT);
+        }
+        y += height * 2;
+    }
+}
+
+// The holodisk reader's bottom line: BACK left of x 395, MORE / DONE right
+// of x 459 (PipStatus).
+static void SplitHoloBackLine()
+{
+    if (!hot_back_line) {
+        return;
+    }
+
+    text_font(101);
+    int height = text_height();
+    int y = height * bottom_line + PIPBOY_WINDOW_CONTENT_VIEW_Y;
+
+    win_delete_button(HotLines[BACK_BUTTON_INDEX]);
+    HotLines[BACK_BUTTON_INDEX] = win_register_button(pip_win, 254, y, 395 - 254, height, -1, -1, -1, 528, NULL, NULL, NULL, BUTTON_FLAG_TRANSPARENT);
+    holo_more_btn = win_register_button(pip_win, 460, y, 604 - 460, height, -1, -1, -1, 528, NULL, NULL, NULL, BUTTON_FLAG_TRANSPARENT);
+}
+#endif
 
 // 0x48938C
 static bool TimedRest(int hours, int minutes, int duration)

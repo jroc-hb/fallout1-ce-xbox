@@ -31,6 +31,7 @@
 #include "plib/gnw/memory.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
+#include "plib/gnw/padnav.h"
 #include <xboxkrnl/xboxkrnl.h>
 
 namespace fallout {
@@ -927,6 +928,87 @@ static int do_prefscreen()
     return rc;
 }
 
+#ifdef NXDK
+// CE: D-pad left/right on a focused slider (padnav.cc): a twentieth of its
+// range per press, applied as dragging it there would.
+static void PrefAdjustSlider(int btn, int dir)
+{
+    int preferenceIndex = -1;
+    for (int i = FIRST_RANGE_PREF; i <= LAST_RANGE_PREF; i++) {
+        if (btndat[i].btn == btn) {
+            preferenceIndex = i;
+        }
+    }
+    if (preferenceIndex == -1) {
+        return;
+    }
+
+    PreferenceDescription* meta = &(btndat[preferenceIndex]);
+    double value;
+    switch (preferenceIndex) {
+    case PREF_TEXT_BASE_DELAY:
+        value = 6.0 - text_delay + 1.0;
+        break;
+    case PREF_BRIGHTNESS:
+        value = gamma_value;
+        break;
+    case PREF_MOUSE_SENSITIVIY:
+        value = mouse_sens;
+        break;
+    default:
+        value = *meta->valuePtr;
+        break;
+    }
+
+    double newValue = value + dir * (meta->maxValue - meta->minValue) / 20.0;
+    if (newValue < meta->minValue) {
+        newValue = meta->minValue;
+    } else if (newValue > meta->maxValue) {
+        newValue = meta->maxValue;
+    }
+
+    switch (preferenceIndex) {
+    case PREF_COMBAT_SPEED:
+        *meta->valuePtr = (int)newValue;
+        break;
+    case PREF_TEXT_BASE_DELAY:
+        text_delay = 6.0 - newValue + 1.0;
+        break;
+    case PREF_MASTER_VOLUME:
+        *meta->valuePtr = (int)newValue;
+        gsound_set_master_volume(master_volume);
+        break;
+    case PREF_MUSIC_VOLUME:
+        *meta->valuePtr = (int)newValue;
+        gsound_background_volume_set(music_volume);
+        break;
+    case PREF_SFX_VOLUME:
+        *meta->valuePtr = (int)newValue;
+        gsound_set_sfx_volume(sndfx_volume);
+        gsound_play_sfx_file("butin1");
+        break;
+    case PREF_SPEECH_VOLUME:
+        *meta->valuePtr = (int)newValue;
+        gsound_speech_volume_set(speech_volume);
+        break;
+    case PREF_BRIGHTNESS:
+        gamma_value = newValue;
+        colorGamma(newValue);
+        break;
+    case PREF_MOUSE_SENSITIVIY:
+        mouse_sens = newValue;
+        break;
+    }
+
+    if (preferenceIndex != PREF_SFX_VOLUME) {
+        gsound_play_sfx_file("ib1p1xx1");
+    }
+    UpdateThing(preferenceIndex);
+    win_draw(prfwin);
+    changed = true;
+}
+#endif
+
 // 0x481F8C
 static int PrefStart()
 {
@@ -1074,6 +1156,11 @@ static int PrefStart()
         }
 
         btndat[i].btn = win_register_button(prfwin, x, y, width, height, mouseEnterEventCode, mouseExitEventCode, mouseDownEventCode, mouseUpEventCode, NULL, NULL, NULL, 32);
+#ifdef NXDK
+        if (i >= FIRST_RANGE_PREF) {
+            padnav_set_adjust(btndat[i].btn, PrefAdjustSlider);
+        }
+#endif
     }
 
     plyrspdbid = win_register_button(prfwin,
@@ -1111,6 +1198,9 @@ static int PrefStart()
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+        padnav_set_highlight_rect(btn, 23 - 8, 450 - 5, 101, 23);
+#endif
     }
 
     // DONE
@@ -1129,6 +1219,9 @@ static int PrefStart()
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+        padnav_set_highlight_rect(btn, 148 - 8, 450 - 5, 98, 23);
+#endif
     }
 
 #ifdef NXDK
@@ -1151,6 +1244,9 @@ static int PrefStart()
         BUTTON_FLAG_TRANSPARENT);
     if (btn != -1) {
         win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+        padnav_set_highlight_rect(btn, 263 - 8, 450 - 5, 98, 23);
+#endif
     }
 
     text_font(101);
@@ -1700,6 +1796,12 @@ static void UpdateThing(int index)
 // 0x483F28
 static int PrefEnd()
 {
+#ifdef NXDK
+    for (int i = FIRST_RANGE_PREF; i <= LAST_RANGE_PREF; i++) {
+        padnav_set_adjust(btndat[i].btn, NULL);
+    }
+#endif
+
     if (changed) {
         SavePrefs(1);
         JustUpdate();

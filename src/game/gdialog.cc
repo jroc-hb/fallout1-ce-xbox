@@ -1,3 +1,4 @@
+#include "game/padkeys.h"
 #include "game/gdialog.h"
 
 #include <assert.h>
@@ -40,6 +41,10 @@
 #include "plib/gnw/rect.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
+#ifdef NXDK
+#include "game/padglyph.h"
+#include "plib/gnw/padnav.h"
+#endif
 
 namespace fallout {
 
@@ -2917,6 +2922,18 @@ static int talk_to_create_barter_win()
         win_register_button_sound_func(dialogue_bids[1], gsound_med_butt_press, gsound_med_butt_release);
     }
 
+#ifdef NXDK
+    {
+        // Hold LT: Y offers, B goes back to talking (inventry.cc ipad_frame;
+        // only without the pointer, where B right-clicks).
+        static const PadGlyphSpot spots[] = {
+            { 41 + 7, 163 + 7, PAD_GLYPH_Y, true },
+            { 584 + 7, 162 + 7, PAD_GLYPH_B, true },
+        };
+        pad_glyph_spots_set(dialogueWindow, spots, 2);
+    }
+#endif
+
     if (obj_new(&peon_table_obj, -1, -1) == -1) {
         return -1;
     }
@@ -2952,6 +2969,10 @@ static void talk_to_destroy_barter_win()
     if (dialogueWindow == -1) {
         return;
     }
+
+#ifdef NXDK
+    pad_glyph_spots_clear(dialogueWindow);
+#endif
 
     obj_erase_object(barterer_temp_obj, 0);
     obj_erase_object(barterer_table_obj, 0);
@@ -3221,6 +3242,20 @@ static int talk_to_create_dialogue_win()
         win_register_button_sound_func(dialogue_bids[1], gsound_med_butt_press, gsound_med_butt_release);
     }
 
+#ifdef NXDK
+    {
+        // Hold LT: Y is Barter (the dialogue loop's b).
+        static const PadGlyphSpot spots[] = {
+            { 593 + 7, 41 + 7, PAD_GLYPH_Y, false },
+        };
+        pad_glyph_spots_set(dialogueWindow, spots, 1);
+    }
+    // The d-pad highlight lights the label with the dot (measured from
+    // screenshots).
+    padnav_set_highlight_rect(dialogue_bids[0], 568, 8, 64, 52);
+    padnav_set_highlight_rect(dialogue_bids[1], 568, 66, 64, 70);
+#endif
+
     fid = art_id(OBJ_TYPE_INTERFACE, 97, 0, 0, 0);
     normal = art_ptr_lock_data(fid, 0, 0, &dialogue_rest_Key1);
     if (normal == NULL) {
@@ -3258,6 +3293,10 @@ static void talk_to_destroy_dialogue_win()
     if (dialogueWindow == -1) {
         return;
     }
+
+#ifdef NXDK
+    pad_glyph_spots_clear(dialogueWindow);
+#endif
 
     for (int index = 0; index < 3; index++) {
         win_delete_button(dialogue_bids[index]);
@@ -3973,10 +4012,14 @@ static void about_loop()
 
     beginTextInput();
 
+    // The pad's on-screen keyboard, over the talking head (the reply box
+    // under it shows the answers). START asks, BACK leaves.
+    padkeys_begin_at((screenGetHeight() - GAME_DIALOG_WINDOW_HEIGHT) / 2 + 14, true);
+
     while (1) {
         sharedFpsLimiter.mark();
 
-        if (about_process_input(get_input()) == -1) {
+        if (about_process_input(padkeys_frame(get_input())) == -1) {
             break;
         }
 
@@ -3984,6 +4027,7 @@ static void about_loop()
         sharedFpsLimiter.throttle();
     }
 
+    padkeys_end();
     endTextInput();
 
     about_exit();

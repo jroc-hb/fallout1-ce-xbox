@@ -28,6 +28,10 @@ void stick_walk_request_use();
 void stick_walk_request_menu();
 // B while the pointer is hidden: examine the highlighted object.
 void stick_walk_request_look();
+// White tapped outside combat: start combat (aiming at the highlighted
+// critter in walk mode). Ignored if the map loop doesn't run it within half
+// a second (e.g. pressed in dialogue).
+void stick_walk_request_combat();
 void stick_walk_run_pending();
 
 // While paused (a pad-driven menu such as the skill wheel is open) the stick

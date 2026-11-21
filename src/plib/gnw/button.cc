@@ -1199,6 +1199,68 @@ void GNW_button_refresh(Window* w, Rect* rect)
 }
 
 // 0x4C5B58
+#ifdef NXDK
+// CE: The two halves of win_button_press_and_release, for the gamepad (A
+// down / A up, padnav.cc), so the pressed image shows while A is held.
+int win_button_press(int btn)
+{
+    if (!GNW_win_init_flag) {
+        return -1;
+    }
+
+    Window* w;
+    Button* button = GNW_find_button(btn, &w);
+    if (button == NULL) {
+        return -1;
+    }
+
+    button_draw(button, w, button->pressedImage, true, NULL, true);
+
+    if (button->leftMouseDownProc != NULL) {
+        button->leftMouseDownProc(btn, button->lefMouseDownEventCode);
+
+        if ((button->flags & BUTTON_FLAG_0x40) != 0) {
+            GNW_add_input_buffer(button->lefMouseDownEventCode);
+        }
+    } else {
+        if (button->lefMouseDownEventCode != -1) {
+            GNW_add_input_buffer(button->lefMouseDownEventCode);
+        }
+    }
+
+    return 0;
+}
+
+int win_button_release(int btn)
+{
+    if (!GNW_win_init_flag) {
+        return -1;
+    }
+
+    Window* w;
+    Button* button = GNW_find_button(btn, &w);
+    if (button == NULL) {
+        return -1;
+    }
+
+    button_draw(button, w, button->normalImage, true, NULL, true);
+
+    if (button->leftMouseUpProc != NULL) {
+        button->leftMouseUpProc(btn, button->leftMouseUpEventCode);
+
+        if ((button->flags & BUTTON_FLAG_0x40) != 0) {
+            GNW_add_input_buffer(button->leftMouseUpEventCode);
+        }
+    } else {
+        if (button->leftMouseUpEventCode != -1) {
+            GNW_add_input_buffer(button->leftMouseUpEventCode);
+        }
+    }
+
+    return 0;
+}
+#endif
+
 int win_button_press_and_release(int btn)
 {
     if (!GNW_win_init_flag) {

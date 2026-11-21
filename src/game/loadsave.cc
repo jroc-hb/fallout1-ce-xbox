@@ -1,3 +1,4 @@
+#include "game/padkeys.h"
 #include "game/loadsave.h"
 
 #include <assert.h>
@@ -48,6 +49,7 @@
 #include "plib/gnw/memory.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
+#include "plib/gnw/padnav.h"
 
 #ifdef NXDK
 #include <windows.h>
@@ -1459,6 +1461,7 @@ static int LSGameStart(int windowType)
 
     #ifdef NXDK
         done_button = btn;
+        padnav_set_highlight_rect(btn, 391 - 11, 349 - 5, 98, 24);
     #endif
 
     btn = win_register_button(lsgwin,
@@ -1480,6 +1483,7 @@ static int LSGameStart(int windowType)
 
     #ifdef NXDK
         cancel_button = btn;
+        padnav_set_highlight_rect(btn, 495 - 11, 349 - 5, 98, 24);
     #endif
 
     btn = win_register_button(lsgwin,
@@ -2267,6 +2271,12 @@ static int get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* des
 
     beginTextInput();
 
+    {
+        Rect fieldWindowRect;
+        win_get_rect(win, &fieldWindowRect);
+        padkeys_begin(fieldWindowRect.ulx + x, fieldWindowRect.uly + y, textLength == 0);
+    }
+
     int blinkCounter = 3;
     bool blink = false;
 
@@ -2282,7 +2292,7 @@ static int get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* des
 
         int tick = get_time();
 
-        int keyCode = get_input();
+        int keyCode = padkeys_frame(get_input());
         if ((keyCode & 0x80000000) == 0) {
             v1++;
         }
@@ -2346,6 +2356,7 @@ static int get_input_str2(int win, int doneKeyCode, int cancelKeyCode, char* des
         sharedFpsLimiter.throttle();
     }
 
+    padkeys_end();
     endTextInput();
 
     if (rc == 0) {

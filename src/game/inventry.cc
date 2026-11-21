@@ -44,6 +44,14 @@
 #include "plib/gnw/input.h"
 #include "plib/gnw/svga.h"
 #include "plib/gnw/text.h"
+#include "plib/gnw/padnav.h"
+
+#ifdef NXDK
+#include <SDL3/SDL.h>
+
+#include "game/padglyph.h"
+#include "plib/gnw/gamepad.hpp"
+#endif
 
 namespace fallout {
 
@@ -348,6 +356,802 @@ static Inventory* target_pud;
 // 0x59CEE4
 static int barter_back_win;
 
+#ifdef NXDK
+// ---------------------------------------------------------------------------
+// Gamepad: the inventory, use-item-on, loot and barter screens without the
+// pointer (pad mode, padnav.cc). The d-pad moves a highlight between the
+// item slots; the face buttons act on the highlighted one through the same
+// code a mouse click runs: the slot's key code is handed to the screen's
+// loop as if it had been clicked (ipad_dispatch), and a drag the screen
+// starts drops where the pad says (ipad_drop: a slot, or carried with the
+// d-pad until A is pressed again), by parking the hidden pointer there, so
+// the screens' own hit tests decide what happens.
+//
+// Inventory: A tap picks the item up and carries it (A again drops, B puts
+// it back); A hold opens the item's action menu (d-pad picks, release
+// chooses); X uses it; Y equips it (armor slot, or the active hand) or takes
+// it off. Loot: A moves the item to the other side, X takes all. Barter: A
+// moves it between the inventory and the offer table, Y offers, B talks.
+// Black/White page the focused list. The focused item is described in the
+// inventory's info panel (barter: the dialogue box).
+// ---------------------------------------------------------------------------
+
+// ipad_drop: no pad drag (a mouse drag), or the item is carried.
+#define IPAD_DROP_NONE -1
+#define IPAD_DROP_CARRY -2
+
+// A press events (ipad_poll_a).
+#define IPAD_A_NONE 0
+#define IPAD_A_PRESS 1
+#define IPAD_A_TAP 2
+#define IPAD_A_HOLD 3
+
+#define IPAD_HOLD_MS 350
+#define IPAD_MAX_SLOTS 32
+
+static bool ipad_open = false;
+static int ipad_type = -1;
+static int ipad_focus = -1; // the highlighted slot's key code
+static bool ipad_hid_mouse = false;
+static bool ipad_dispatch = false; // this frame's slot event comes from the pad
+static int ipad_menu = 0; // with ipad_dispatch: 1 action menu, 2 ipad_action directly
+static int ipad_action = -1;
+static int ipad_drop = IPAD_DROP_NONE;
+static bool ipad_carrying = false;
+static int ipad_described_key = -2;
+static Object* ipad_described_item = NULL;
+static int ipad_presses[SDL_GAMEPAD_BUTTON_COUNT];
+static bool ipad_a_down = false;
+static bool ipad_a_used = false;
+static bool ipad_a_was_held = false;
+static unsigned int ipad_a_time = 0;
+
+static void ipad_reset_buttons()
+{
+    for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT; button++) {
+        ipad_presses[button] = GamepadButtonPresses(button);
+    }
+    ipad_a_was_held = GamepadClickHeld();
+    ipad_a_down = ipad_a_was_held;
+    ipad_a_used = true; // a press already going doesn't count
+}
+
+static bool ipad_pressed(int button)
+{
+    int count = GamepadButtonPresses(button);
+    bool pressed = count != ipad_presses[button];
+    ipad_presses[button] = count;
+    return pressed;
+}
+
+static int ipad_poll_a()
+{
+    bool held = GamepadClickHeld();
+    bool pressed = ipad_pressed(SDL_GAMEPAD_BUTTON_SOUTH) || (held && !ipad_a_was_held);
+    ipad_a_was_held = held;
+
+    int event = IPAD_A_NONE;
+    if (pressed) {
+        ipad_a_down = true;
+        ipad_a_used = false;
+        ipad_a_time = get_time();
+        event = IPAD_A_PRESS;
+    }
+    if (ipad_a_down && !held) {
+        ipad_a_down = false;
+        if (!ipad_a_used) {
+            event = IPAD_A_TAP;
+        }
+    } else if (ipad_a_down && !ipad_a_used && elapsed_time(ipad_a_time) >= IPAD_HOLD_MS) {
+        ipad_a_used = true;
+        event = IPAD_A_HOLD;
+    }
+    return event;
+}
+
+// The list a key belongs to (its first row's key), or -1 (hands, armor).
+static int ipad_column(int key)
+{
+    if (key >= 1000 && key < 1000 + inven_cur_disp) return 1000;
+    if (key >= 2000 && key < 2000 + inven_cur_disp) return 2000;
+    if (key >= 2300 && key < 2300 + inven_cur_disp) return 2300;
+    if (key >= 2400 && key < 2400 + inven_cur_disp) return 2400;
+    return -1;
+}
+
+static int* ipad_column_offset(int column)
+{
+    switch (column) {
+    case 1000: return &(stack_offset[curr_stack]);
+    case 2000: return &(target_stack_offset[target_curr_stack]);
+    case 2300: return &ptable_offset;
+    case 2400: return &btable_offset;
+    }
+    return NULL;
+}
+
+static int ipad_column_length(int column)
+{
+    switch (column) {
+    case 1000: return pud->length;
+    case 2000: return target_pud->length;
+    case 2300: return ptable_pud->length;
+    case 2400: return btable_pud->length;
+    }
+    return 0;
+}
+
+static void ipad_column_redraw(int column)
+{
+    switch (column) {
+    case 1000:
+        display_inventory(stack_offset[curr_stack], -1, ipad_type);
+        break;
+    case 2000:
+        display_target_inventory(target_stack_offset[target_curr_stack], -1, target_pud, ipad_type);
+        win_draw(i_wid);
+        break;
+    case 2300:
+    case 2400:
+        display_table_inventories(barter_back_win, ptable, btable, -1);
+        break;
+    }
+}
+
+// A slot's rectangle in i_wid.
+static bool ipad_slot_rect(int key, Rect* rect)
+{
+    int x;
+    int y;
+    int width = INVENTORY_SLOT_WIDTH;
+    int height = INVENTORY_SLOT_HEIGHT;
+    int column = ipad_column(key);
+    int row = column != -1 ? key - column : 0;
+
+    switch (ipad_type) {
+    case INVENTORY_WINDOW_TYPE_NORMAL:
+    case INVENTORY_WINDOW_TYPE_USE_ITEM_ON:
+        if (column == 1000) {
+            x = INVENTORY_SCROLLER_X;
+            y = INVENTORY_SCROLLER_Y + row * INVENTORY_SLOT_HEIGHT;
+        } else if (ipad_type == INVENTORY_WINDOW_TYPE_NORMAL && key >= 1006 && key <= 1008) {
+            width = INVENTORY_LARGE_SLOT_WIDTH;
+            height = INVENTORY_LARGE_SLOT_HEIGHT;
+            x = key == 1006 ? INVENTORY_RIGHT_HAND_SLOT_X : INVENTORY_LEFT_HAND_SLOT_X;
+            y = key == 1008 ? INVENTORY_ARMOR_SLOT_Y : INVENTORY_LEFT_HAND_SLOT_Y;
+        } else {
+            return false;
+        }
+        break;
+    case INVENTORY_WINDOW_TYPE_LOOT:
+        if (column == 1000) {
+            x = INVENTORY_LOOT_LEFT_SCROLLER_X;
+        } else if (column == 2000) {
+            x = INVENTORY_LOOT_RIGHT_SCROLLER_X;
+        } else {
+            return false;
+        }
+        y = INVENTORY_LOOT_LEFT_SCROLLER_Y + row * INVENTORY_SLOT_HEIGHT;
+        break;
+    case INVENTORY_WINDOW_TYPE_TRADE:
+        switch (column) {
+        case 1000: x = INVENTORY_TRADE_LEFT_SCROLLER_X; y = INVENTORY_TRADE_SCROLLER_Y; break;
+        case 2000: x = INVENTORY_TRADE_RIGHT_SCROLLER_X; y = INVENTORY_TRADE_SCROLLER_Y; break;
+        case 2300: x = INVENTORY_TRADE_INNER_LEFT_SCROLLER_X; y = INVENTORY_TRADE_INNER_SCROLLER_Y; break;
+        case 2400: x = INVENTORY_TRADE_INNER_RIGHT_SCROLLER_X; y = INVENTORY_TRADE_INNER_SCROLLER_Y; break;
+        default: return false;
+        }
+        y += row * INVENTORY_SLOT_HEIGHT;
+        break;
+    default:
+        return false;
+    }
+
+    rect->ulx = x;
+    rect->uly = y;
+    rect->lrx = x + width - 1;
+    rect->lry = y + height - 1;
+    return true;
+}
+
+// The slots the d-pad can reach: the rows holding items (at least the top
+// one of each list) and, in the inventory, the hands and armor. Carrying,
+// every row (anywhere on the list drops into it).
+static int ipad_slots(int* keys)
+{
+    static const int columns[] = { 1000, 2000, 2300, 2400 };
+    int count = 0;
+    for (int index = 0; index < 4; index++) {
+        int column = columns[index];
+        Rect rect;
+        if (!ipad_slot_rect(column, &rect)) {
+            continue;
+        }
+        int rows = ipad_carrying ? inven_cur_disp : ipad_column_length(column) - *ipad_column_offset(column);
+        rows = std::max(1, std::min(rows, inven_cur_disp));
+        for (int row = 0; row < rows; row++) {
+            keys[count++] = column + row;
+        }
+    }
+    if (ipad_type == INVENTORY_WINDOW_TYPE_NORMAL) {
+        keys[count++] = 1008;
+        keys[count++] = 1007;
+        keys[count++] = 1006;
+    }
+    return count;
+}
+
+static void ipad_slot_center(int key, int* x, int* y)
+{
+    Rect rect;
+    if (!ipad_slot_rect(key, &rect)) {
+        rect.ulx = rect.lrx = rect.uly = rect.lry = 0;
+    }
+    Rect windowRect;
+    win_get_rect(i_wid, &windowRect);
+    *x = windowRect.ulx + (rect.ulx + rect.lrx) / 2;
+    *y = windowRect.uly + (rect.uly + rect.lry) / 2;
+}
+
+// The hidden pointer on a slot: the screens' hit tests read it.
+static void ipad_park(int key)
+{
+    int x;
+    int y;
+    ipad_slot_center(key, &x, &y);
+    mouse_set_position(x, y);
+}
+
+// Keeps the focus on a reachable slot.
+static void ipad_validate_focus()
+{
+    int keys[IPAD_MAX_SLOTS];
+    int count = ipad_slots(keys);
+    for (int index = 0; index < count; index++) {
+        if (keys[index] == ipad_focus) {
+            return;
+        }
+    }
+
+    // The item went: the last row of the same list, else the first slot.
+    int column = ipad_column(ipad_focus);
+    int best = count > 0 ? keys[0] : -1;
+    for (int index = 0; index < count; index++) {
+        if (column != -1 && ipad_column(keys[index]) == column) {
+            best = keys[index];
+        }
+    }
+    ipad_focus = best;
+}
+
+// Scrolls a list by `rows` (negative: up). False if it can't move.
+static bool ipad_scroll(int column, int rows)
+{
+    int* offset = ipad_column_offset(column);
+    if (offset == NULL) {
+        return false;
+    }
+    int length = ipad_column_length(column);
+    int newOffset = std::max(0, std::min(*offset + rows, length - inven_cur_disp));
+    if (newOffset == *offset) {
+        return false;
+    }
+    *offset = newOffset;
+    ipad_column_redraw(column);
+    return true;
+}
+
+static void ipad_move(int dx, int dy)
+{
+    int column = ipad_column(ipad_focus);
+
+    // Up and down a list scroll it at its ends (not while carrying: the drag
+    // remembers where the list was).
+    if (dy != 0 && column != -1) {
+        int row = ipad_focus - column;
+        int newRow = row + dy;
+        int rows = ipad_carrying ? inven_cur_disp : ipad_column_length(column) - *ipad_column_offset(column);
+        if (newRow >= 0 && newRow < std::min(rows, inven_cur_disp)) {
+            ipad_focus = column + newRow;
+            gsound_play_sfx_file("ib1p1xx1");
+            return;
+        }
+        if (!ipad_carrying && ipad_scroll(column, dy)) {
+            gsound_play_sfx_file("ib1p1xx1");
+            return;
+        }
+    }
+
+    // Otherwise the nearest slot that way.
+    int keys[IPAD_MAX_SLOTS];
+    int count = ipad_slots(keys);
+    int fromX;
+    int fromY;
+    ipad_slot_center(ipad_focus, &fromX, &fromY);
+    // Within ~50 degrees of the direction first; else anything on that side
+    // (the hands are far below the top rows of the list).
+    int best = -1;
+    for (int pass = 0; pass < 2 && best == -1; pass++) {
+        int bestScore = INT_MAX;
+        for (int index = 0; index < count; index++) {
+            if (keys[index] == ipad_focus) {
+                continue;
+            }
+            int x;
+            int y;
+            ipad_slot_center(keys[index], &x, &y);
+            int along = (x - fromX) * dx + (y - fromY) * dy;
+            int across = abs((x - fromX) * dy - (y - fromY) * dx);
+            if (along <= 0 || (pass == 0 && across > along * 6 / 5)) {
+                continue;
+            }
+            int score = along + 3 * across;
+            if (score < bestScore) {
+                bestScore = score;
+                best = keys[index];
+            }
+        }
+    }
+    if (best != -1) {
+        ipad_focus = best;
+        gsound_play_sfx_file("ib1p1xx1");
+    }
+}
+
+static void ipad_highlight()
+{
+    Rect rect;
+    if (ipad_focus != -1 && ipad_slot_rect(ipad_focus, &rect)) {
+        padnav_show_area(i_wid, rect.ulx, rect.uly, rect.lrx - rect.ulx + 1, rect.lry - rect.uly + 1);
+    } else {
+        padnav_hide_area();
+    }
+}
+
+// The focused item in the inventory's info panel (barter: the dialogue box).
+static void ipad_describe()
+{
+    Object* item = NULL;
+    if (ipad_focus != -1) {
+        inven_from_button(ipad_focus, &item, NULL, NULL);
+    }
+    if (ipad_focus == ipad_described_key && item == ipad_described_item) {
+        return;
+    }
+    ipad_described_key = ipad_focus;
+    ipad_described_item = item;
+
+    if (ipad_type == INVENTORY_WINDOW_TYPE_NORMAL) {
+        if (item != NULL) {
+            inven_obj_examine_func(stack[0], item);
+        } else {
+            display_stats();
+        }
+        win_draw(i_wid);
+    } else if (ipad_type == INVENTORY_WINDOW_TYPE_TRADE && item != NULL) {
+        obj_look_at_func(stack[0], item, display_msg);
+    }
+}
+
+// The buttons' meaning on this screen, with their glyphs, in a small window
+// over the screen (its own window, so the screen's redraws can't erase it):
+// the bottom of the info panel in the inventory, the middle plate in loot.
+// Only in pad mode.
+static int ipad_hint_win = -1;
+
+typedef struct IpadHint {
+    PadGlyph glyph;
+    const char* text;
+} IpadHint;
+
+static void ipad_hint_hide()
+{
+    if (ipad_hint_win != -1) {
+        win_delete(ipad_hint_win);
+        ipad_hint_win = -1;
+    }
+}
+
+static void ipad_hint_show()
+{
+    if (ipad_hint_win != -1) {
+        return;
+    }
+
+    static const IpadHint inventoryHints[] = {
+        { PAD_GLYPH_A, "Move" }, { PAD_GLYPH_Y, "Equip" }, { PAD_GLYPH_COUNT, NULL },
+        { PAD_GLYPH_X, "Use" }, { PAD_GLYPH_B, "Close" },
+    };
+    static const IpadHint lootHints[] = {
+        { PAD_GLYPH_A, "Move" }, { PAD_GLYPH_X, "Take all" }, { PAD_GLYPH_B, "Done" },
+    };
+
+    const IpadHint* hints;
+    int hintCount;
+    int x; // in i_wid
+    int y;
+    int width;
+    int lines;
+    if (ipad_type == INVENTORY_WINDOW_TYPE_NORMAL) {
+        hints = inventoryHints;
+        hintCount = sizeof(inventoryHints) / sizeof(inventoryHints[0]);
+        x = 299;
+        width = 148;
+        lines = 2;
+        y = 231 - lines * (pad_glyph_size() + 3);
+    } else if (ipad_type == INVENTORY_WINDOW_TYPE_LOOT) {
+        hints = lootHints;
+        hintCount = sizeof(lootHints) / sizeof(lootHints[0]);
+        x = 160;
+        width = 210;
+        lines = 1;
+        y = 296;
+    } else {
+        return;
+    }
+    int lineHeight = pad_glyph_size() + 3;
+    int height = lines * lineHeight;
+
+    Rect windowRect;
+    win_get_rect(i_wid, &windowRect);
+    ipad_hint_win = win_add(windowRect.ulx + x, windowRect.uly + y, width, height, 0, WINDOW_MOVE_ON_TOP | WINDOW_NO_PAD_NAV);
+    if (ipad_hint_win == -1) {
+        return;
+    }
+    unsigned char* buf = win_get_buf(ipad_hint_win);
+
+    // The screen's clean background under it.
+    InventoryWindowDescription* description = &(iscr_data[ipad_type]);
+    CacheEntry* handle;
+    unsigned char* background = art_ptr_lock_data(art_id(OBJ_TYPE_INTERFACE, description->field_0, 0, 0, 0), 0, 0, &handle);
+    if (background != NULL) {
+        buf_to_buf(background + description->width * y + x, width, height, description->width, buf, width);
+        art_ptr_unlock(handle);
+    }
+
+    int oldFont = text_curr();
+    text_font(101);
+
+    // Each line centred: glyph, gap, word, wider gap.
+    int start = 0;
+    for (int line = 0; line < lines; line++) {
+        int end = start;
+        int lineWidth = 0;
+        while (end < hintCount && hints[end].text != NULL) {
+            lineWidth += pad_glyph_size() + 3 + text_width(hints[end].text) + 10;
+            end++;
+        }
+        lineWidth -= 10;
+
+        int left = std::max(0, (width - lineWidth) / 2);
+        int top = line * lineHeight + 1;
+        for (int index = start; index < end; index++) {
+            pad_glyph_draw(buf, width, width, height, left, top, hints[index].glyph);
+            left += pad_glyph_size() + 3;
+
+            // Outlined in black, as the wheels' hints, for the metal plates.
+            static unsigned char scratch[200 * 20];
+            int textWidth = text_width(hints[index].text) + 2;
+            int textHeight = text_height() + 2;
+            if (textWidth <= 200 && textHeight <= 20) {
+                memset(scratch, 0, textWidth * textHeight);
+                text_to_buf(scratch + textWidth + 1, hints[index].text, textWidth - 1, textWidth, colorTable[992]);
+                buf_outline(scratch, textWidth, textHeight, textWidth, colorTable[0]);
+                int textTop = top + (pad_glyph_size() - text_height()) / 2 - 1;
+                if (left + textWidth <= width && textTop >= 0 && textTop + textHeight <= height) {
+                    trans_buf_to_buf(scratch, textWidth, textHeight, textWidth, buf + width * textTop + left, width);
+                }
+            }
+            left += text_width(hints[index].text) + 10;
+        }
+        start = end + 1;
+    }
+
+    text_font(oldFont);
+    win_draw(ipad_hint_win);
+}
+
+// Pad mode on: the pointer hidden and parked on the focus, the highlight
+// shown. Off: the pointer back where the focus was.
+static void ipad_sync()
+{
+    if (padnav_pad_mode_on()) {
+        if (!mouse_hidden()) {
+            mouse_hide();
+            ipad_hid_mouse = true;
+        }
+        if (immode != INVENTORY_WINDOW_CURSOR_HAND) {
+            inven_set_mouse(INVENTORY_WINDOW_CURSOR_HAND);
+        }
+        ipad_validate_focus();
+        ipad_park(ipad_focus);
+        ipad_highlight();
+        ipad_describe();
+        // In the inventory the hints sit at the bottom of the info panel:
+        // only over a description, not the stats (they'd cover the weight).
+        if (ipad_type != INVENTORY_WINDOW_TYPE_NORMAL || ipad_described_item != NULL) {
+            ipad_hint_show();
+        } else {
+            ipad_hint_hide();
+        }
+    } else {
+        padnav_hide_area();
+        ipad_hint_hide();
+        if (ipad_hid_mouse) {
+            ipad_hid_mouse = false;
+            mouse_show();
+        }
+    }
+}
+
+static void ipad_begin(int inventoryWindowType)
+{
+    ipad_open = true;
+    ipad_type = inventoryWindowType;
+    ipad_dispatch = false;
+    ipad_drop = IPAD_DROP_NONE;
+    ipad_carrying = false;
+    ipad_described_key = -2;
+    ipad_described_item = NULL;
+    // Looting starts on the container's side.
+    ipad_focus = inventoryWindowType == INVENTORY_WINDOW_TYPE_LOOT ? 2000 : 1000;
+    padnav_menu_opened();
+    GamepadSetScreenCapture(true);
+    ipad_reset_buttons();
+}
+
+static void ipad_end()
+{
+    ipad_open = false;
+    GamepadSetScreenCapture(false);
+    padnav_hide_area();
+    ipad_hint_hide();
+    if (ipad_hid_mouse) {
+        ipad_hid_mouse = false;
+        mouse_show();
+    }
+}
+
+// The row to drop an unequipped item on: the first free one, else one whose
+// item doesn't take it (a container would swallow it).
+static int ipad_unequip_target()
+{
+    int rows = pud->length - stack_offset[curr_stack];
+    if (rows < inven_cur_disp) {
+        return 1000 + std::max(rows, 0);
+    }
+    for (int row = 0; row < inven_cur_disp; row++) {
+        Object* item;
+        if (inven_from_button(1000 + row, &item, NULL, NULL) != 0 && item_get_type(item) != ITEM_TYPE_CONTAINER) {
+            return 1000 + row;
+        }
+    }
+    return 1000;
+}
+
+// Once per frame, right after get_input in each screen's loop. Returns the
+// key code the loop should handle: the input as is (pointer mode), -1
+// (consumed), or what a pad button stands for (a slot to click, Escape...).
+static int ipad_frame(int keyCode)
+{
+    // Whatever the last pad action did may have redrawn the info panel
+    // (stats after a Use, a drop...), and presses made in a window it opened
+    // (the quantity window, a message box) were that window's.
+    if (ipad_dispatch) {
+        ipad_described_key = -2;
+        ipad_reset_buttons();
+    }
+    ipad_dispatch = false;
+    ipad_menu = 0;
+    ipad_drop = IPAD_DROP_NONE;
+
+    if (!ipad_open || padnav_active()) {
+        return keyCode;
+    }
+
+    bool arrow = keyCode == KEY_ARROW_UP || keyCode == KEY_ARROW_DOWN || keyCode == KEY_ARROW_LEFT || keyCode == KEY_ARROW_RIGHT;
+
+    if (!padnav_pad_mode_on()) {
+        ipad_sync();
+        ipad_reset_buttons();
+        if (arrow) {
+            // The d-pad: back to the highlight, on the slot under the
+            // pointer if there is one.
+            int keys[IPAD_MAX_SLOTS];
+            int count = ipad_slots(keys);
+            for (int index = 0; index < count; index++) {
+                Rect rect;
+                if (ipad_slot_rect(keys[index], &rect) && mouseHitTestInWindow(i_wid, rect.ulx, rect.uly, rect.lrx, rect.lry)) {
+                    ipad_focus = keys[index];
+                }
+            }
+            padnav_set_pad_mode(true);
+            ipad_described_key = -2; // the pointer's hover may have changed the panel
+            ipad_sync();
+            return -1;
+        }
+        return keyCode;
+    }
+
+    if (arrow) {
+        ipad_move(keyCode == KEY_ARROW_LEFT ? -1 : keyCode == KEY_ARROW_RIGHT ? 1 : 0,
+            keyCode == KEY_ARROW_UP ? -1 : keyCode == KEY_ARROW_DOWN ? 1 : 0);
+        keyCode = -1;
+    }
+
+    int result = keyCode;
+    int column = ipad_column(ipad_focus);
+
+    int a = ipad_poll_a();
+    if (a == IPAD_A_TAP || a == IPAD_A_HOLD) {
+        ipad_dispatch = true;
+        result = ipad_focus;
+        if (a == IPAD_A_HOLD) {
+            ipad_menu = 1;
+        } else {
+            switch (ipad_type) {
+            case INVENTORY_WINDOW_TYPE_NORMAL:
+                ipad_drop = IPAD_DROP_CARRY;
+                break;
+            case INVENTORY_WINDOW_TYPE_LOOT:
+                ipad_drop = column == 1000 ? 2000 : 1000;
+                break;
+            case INVENTORY_WINDOW_TYPE_TRADE:
+                ipad_drop = column == 1000 ? 2300 : column == 2000 ? 2400 : column == 2300 ? 1000 : 2000;
+                break;
+            }
+        }
+    }
+
+    if (ipad_pressed(SDL_GAMEPAD_BUTTON_WEST)) { // X
+        if (ipad_type == INVENTORY_WINDOW_TYPE_NORMAL) {
+            // Use (drugs, books...); the action menu's own checks apply.
+            ipad_dispatch = true;
+            ipad_menu = 2;
+            ipad_action = GAME_MOUSE_ACTION_MENU_ITEM_USE;
+            result = ipad_focus;
+        } else if (ipad_type == INVENTORY_WINDOW_TYPE_LOOT) {
+            result = KEY_UPPERCASE_A; // take all
+        }
+    }
+
+    if (ipad_pressed(SDL_GAMEPAD_BUTTON_NORTH)) { // Y
+        if (ipad_type == INVENTORY_WINDOW_TYPE_NORMAL) {
+            Object* item;
+            if (inven_from_button(ipad_focus, &item, NULL, NULL) != 0) {
+                ipad_dispatch = true;
+                result = ipad_focus;
+                if (column == -1) {
+                    ipad_drop = ipad_unequip_target(); // take it off
+                } else if (item_get_type(item) == ITEM_TYPE_ARMOR) {
+                    ipad_drop = 1008;
+                } else {
+                    ipad_drop = intface_is_item_right_hand() ? 1006 : 1007;
+                }
+            }
+        } else if (ipad_type == INVENTORY_WINDOW_TYPE_TRADE) {
+            result = KEY_LOWERCASE_M; // offer
+        }
+    }
+
+    if (ipad_pressed(SDL_GAMEPAD_BUTTON_EAST)) { // B
+        if (ipad_type == INVENTORY_WINDOW_TYPE_TRADE) {
+            result = KEY_LOWERCASE_T; // back to talking
+        } else if (ipad_type != INVENTORY_WINDOW_TYPE_LOOT && curr_stack != 0) {
+            result = 2500; // out of the bag
+        } else {
+            result = KEY_ESCAPE;
+        }
+    }
+
+    bool pageUp = ipad_pressed(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER); // Black
+    bool pageDown = ipad_pressed(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER); // White
+    if (pageUp || pageDown) {
+        if (ipad_scroll(column != -1 ? column : 1000, pageUp ? -inven_cur_disp : inven_cur_disp)) {
+            gsound_play_sfx_file("ib1p1xx1");
+        }
+    }
+
+    ipad_sync();
+    return result;
+}
+
+// Where the screens wait for a drag's mouse button to come up: a drag the
+// pad started drops at the slot it chose, or is carried with the d-pad.
+// False: an ordinary mouse drag.
+static bool ipad_drag(int originKey)
+{
+    if (ipad_drop == IPAD_DROP_NONE) {
+        return false;
+    }
+
+    int drop = ipad_drop;
+    ipad_drop = IPAD_DROP_NONE;
+    if (drop != IPAD_DROP_CARRY) {
+        ipad_park(drop);
+        return true;
+    }
+
+    // Carried: the item is the pointer, on the focused slot.
+    ipad_carrying = true;
+    ipad_focus = originKey;
+    ipad_park(ipad_focus);
+    mouse_show();
+    ipad_highlight();
+
+    for (;;) {
+        sharedFpsLimiter.mark();
+
+        int keyCode = get_input();
+        if (ipad_type == INVENTORY_WINDOW_TYPE_NORMAL) {
+            display_body(-1, INVENTORY_WINDOW_TYPE_NORMAL);
+        }
+
+        // A stick may move the pointer freely; the d-pad puts it on a slot.
+        padnav_set_pad_mode(true);
+        if (keyCode == KEY_ARROW_UP || keyCode == KEY_ARROW_DOWN || keyCode == KEY_ARROW_LEFT || keyCode == KEY_ARROW_RIGHT) {
+            ipad_move(keyCode == KEY_ARROW_LEFT ? -1 : keyCode == KEY_ARROW_RIGHT ? 1 : 0,
+                keyCode == KEY_ARROW_UP ? -1 : keyCode == KEY_ARROW_DOWN ? 1 : 0);
+            ipad_park(ipad_focus);
+            ipad_highlight();
+        }
+
+        int a = ipad_poll_a();
+        if (a == IPAD_A_PRESS || a == IPAD_A_TAP) {
+            ipad_a_used = true; // its release isn't a tap
+            break;
+        }
+        if (ipad_pressed(SDL_GAMEPAD_BUTTON_EAST) || keyCode == KEY_ESCAPE) {
+            // Put back where it came from.
+            ipad_focus = originKey;
+            ipad_park(ipad_focus);
+            break;
+        }
+        if (game_user_wants_to_quit != 0) {
+            break;
+        }
+
+        renderPresent();
+        sharedFpsLimiter.throttle();
+    }
+
+    ipad_carrying = false;
+    mouse_hide();
+    ipad_hid_mouse = true;
+    return true;
+}
+
+static bool inven_left_down()
+{
+    return ipad_dispatch || (mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_DOWN) != 0;
+}
+
+static bool inven_right_down()
+{
+    return !ipad_dispatch && (mouse_get_buttons() & MOUSE_EVENT_RIGHT_BUTTON_DOWN) != 0;
+}
+
+static bool inven_menu_mode()
+{
+    return ipad_dispatch ? ipad_menu != 0 : immode == INVENTORY_WINDOW_CURSOR_ARROW;
+}
+#else
+static bool inven_left_down()
+{
+    return (mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_DOWN) != 0;
+}
+
+static bool inven_right_down()
+{
+    return (mouse_get_buttons() & MOUSE_EVENT_RIGHT_BUTTON_DOWN) != 0;
+}
+
+static bool inven_menu_mode()
+{
+    return immode == INVENTORY_WINDOW_CURSOR_ARROW;
+}
+#endif
+
 // 0x4623E8
 void inven_set_dude(Object* obj, int pid)
 {
@@ -425,11 +1229,17 @@ void handle_inventory()
     display_stats();
     display_inventory(stack_offset[curr_stack], -1, INVENTORY_WINDOW_TYPE_NORMAL);
     inven_set_mouse(INVENTORY_WINDOW_CURSOR_HAND);
+#ifdef NXDK
+    ipad_begin(INVENTORY_WINDOW_TYPE_NORMAL);
+#endif
 
     for (;;) {
         sharedFpsLimiter.mark();
 
         int keyCode = get_input();
+#ifdef NXDK
+        keyCode = ipad_frame(keyCode);
+#endif
 
         if (keyCode == KEY_ESCAPE || keyCode == KEY_UPPERCASE_I || keyCode == KEY_LOWERCASE_I) {
             break;
@@ -460,7 +1270,7 @@ void handle_inventory()
         } else if (keyCode == 2500) {
             container_exit(keyCode, INVENTORY_WINDOW_TYPE_NORMAL);
         } else {
-            if ((mouse_get_buttons() & MOUSE_EVENT_RIGHT_BUTTON_DOWN) != 0) {
+            if (inven_right_down()) {
                 if (immode == INVENTORY_WINDOW_CURSOR_HAND) {
                     inven_set_mouse(INVENTORY_WINDOW_CURSOR_ARROW);
                 } else if (immode == INVENTORY_WINDOW_CURSOR_ARROW) {
@@ -468,9 +1278,9 @@ void handle_inventory()
                     display_stats();
                     win_draw(i_wid);
                 }
-            } else if ((mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_DOWN) != 0) {
+            } else if (inven_left_down()) {
                 if (keyCode >= 1000 && keyCode <= 1008) {
-                    if (immode == INVENTORY_WINDOW_CURSOR_ARROW) {
+                    if (inven_menu_mode()) {
                         inven_action_cursor(keyCode, INVENTORY_WINDOW_TYPE_NORMAL);
                     } else {
                         inven_pickup(keyCode, stack_offset[curr_stack]);
@@ -499,6 +1309,10 @@ void handle_inventory()
         renderPresent();
         sharedFpsLimiter.throttle();
     }
+
+#ifdef NXDK
+    ipad_end();
+#endif
 
     inven_dude = stack[0];
     adjust_fid();
@@ -554,6 +1368,10 @@ bool setup_inventory(int inventoryWindowType)
             WINDOW_MODAL | WINDOW_MOVE_ON_TOP);
         i_wid_max_x = windowDescription->width + inventoryWindowX;
         i_wid_max_y = windowDescription->height + inventoryWindowY;
+#ifdef NXDK
+        // The inventory screens keep the pointer (padnav.cc).
+        padnav_set_window_flags(i_wid, WINDOW_NO_PAD_NAV);
+#endif
 
         unsigned char* dest = win_get_buf(i_wid);
         int backgroundFid = art_id(OBJ_TYPE_INTERFACE, windowDescription->field_0, 0, 0, 0);
@@ -579,6 +1397,9 @@ bool setup_inventory(int inventoryWindowType)
         i_wid = win_add(tradeWindowX, tradeWindowY, INVENTORY_TRADE_WINDOW_WIDTH, INVENTORY_TRADE_WINDOW_HEIGHT, 257, 0);
         i_wid_max_x = tradeWindowX + INVENTORY_TRADE_WINDOW_WIDTH;
         i_wid_max_y = tradeWindowY + INVENTORY_TRADE_WINDOW_HEIGHT;
+#ifdef NXDK
+        padnav_set_window_flags(i_wid, WINDOW_NO_PAD_NAV);
+#endif
 
         unsigned char* dest = win_get_buf(i_wid);
         unsigned char* src = win_get_buf(barter_back_win);
@@ -2030,6 +2851,9 @@ void inven_pickup(int keyCode, int first_item_index)
         gsound_play_sfx_file("ipickup1");
     }
 
+#ifdef NXDK
+    if (!ipad_drag(keyCode))
+#endif
     do {
         sharedFpsLimiter.mark();
 
@@ -2288,6 +3112,9 @@ void use_inventory_on(Object* a1)
     bool isoWasEnabled = setup_inventory(INVENTORY_WINDOW_TYPE_USE_ITEM_ON);
     display_inventory(stack_offset[curr_stack], -1, INVENTORY_WINDOW_TYPE_USE_ITEM_ON);
     inven_set_mouse(INVENTORY_WINDOW_CURSOR_HAND);
+#ifdef NXDK
+    ipad_begin(INVENTORY_WINDOW_TYPE_USE_ITEM_ON);
+#endif
     for (;;) {
         sharedFpsLimiter.mark();
 
@@ -2298,6 +3125,9 @@ void use_inventory_on(Object* a1)
         display_body(-1, INVENTORY_WINDOW_TYPE_USE_ITEM_ON);
 
         int keyCode = get_input();
+#ifdef NXDK
+        keyCode = ipad_frame(keyCode);
+#endif
         switch (keyCode) {
         case KEY_HOME:
             stack_offset[curr_stack] = 0;
@@ -2343,15 +3173,15 @@ void use_inventory_on(Object* a1)
             container_exit(keyCode, INVENTORY_WINDOW_TYPE_USE_ITEM_ON);
             break;
         default:
-            if ((mouse_get_buttons() & MOUSE_EVENT_RIGHT_BUTTON_DOWN) != 0) {
+            if (inven_right_down()) {
                 if (immode == INVENTORY_WINDOW_CURSOR_HAND) {
                     inven_set_mouse(INVENTORY_WINDOW_CURSOR_ARROW);
                 } else {
                     inven_set_mouse(INVENTORY_WINDOW_CURSOR_HAND);
                 }
-            } else if ((mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_DOWN) != 0) {
+            } else if (inven_left_down()) {
                 if (keyCode >= 1000 && keyCode < 1000 + inven_cur_disp) {
-                    if (immode == INVENTORY_WINDOW_CURSOR_ARROW) {
+                    if (inven_menu_mode()) {
                         inven_action_cursor(keyCode, INVENTORY_WINDOW_TYPE_USE_ITEM_ON);
                     } else {
                         int inventoryItemIndex = stack_offset[curr_stack] + keyCode - 1000;
@@ -2391,6 +3221,10 @@ void use_inventory_on(Object* a1)
         renderPresent();
         sharedFpsLimiter.throttle();
     }
+
+#ifdef NXDK
+    ipad_end();
+#endif
 
     exit_inventory(isoWasEnabled);
 
@@ -3275,8 +4109,16 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
 
     int itemType = item_get_type(item);
 
+    // The pad (ipad_frame): 1 the menu, picked with the d-pad while A is
+    // held (the hold that opened it); 2 ipad_action straight away.
+#ifdef NXDK
+    int padMenu = ipad_dispatch ? ipad_menu : 0;
+#else
+    int padMenu = 0;
+#endif
+
     int mouseState;
-    do {
+    if (padMenu == 0) do {
         sharedFpsLimiter.mark();
 
         get_input();
@@ -3300,7 +4142,9 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
         sharedFpsLimiter.throttle();
     } while ((mouseState & MOUSE_EVENT_LEFT_BUTTON_DOWN_REPEAT) != MOUSE_EVENT_LEFT_BUTTON_DOWN_REPEAT);
 
-    inven_set_mouse(INVENTORY_WINDOW_CURSOR_BLANK);
+    if (padMenu != 2) {
+        inven_set_mouse(INVENTORY_WINDOW_CURSOR_BLANK);
+    }
 
     unsigned char* windowBuffer = win_get_buf(i_wid);
 
@@ -3355,6 +4199,22 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
 
     InventoryWindowDescription* windowDescription = &(iscr_data[inventoryWindowType]);
 
+    int menuItemIndex = 0;
+#ifdef NXDK
+    if (padMenu == 2) {
+        // A direct action: only if the menu would offer it.
+        menuItemIndex = -1;
+        for (int index = 0; index < actionMenuItemsLength; index++) {
+            if (actionMenuItems[index] == ipad_action) {
+                menuItemIndex = index;
+            }
+        }
+        if (menuItemIndex == -1) {
+            return;
+        }
+    } else {
+#endif
+
     Rect windowRect;
     win_get_rect(i_wid, &windowRect);
     int inventoryWindowX = windowRect.ulx;
@@ -3396,16 +4256,43 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
         BUTTON_FLAG_TRANSPARENT);
     win_draw_rect(i_wid, &rect);
 
-    int menuItemIndex = 0;
     int previousMouseY = y;
-    while ((mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_UP) == 0) {
+    while (padMenu == 1 ? GamepadClickHeld() : (mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_UP) == 0) {
         sharedFpsLimiter.mark();
 
-        get_input();
+        int keyCode = get_input();
 
         if (inventoryWindowType == INVENTORY_WINDOW_TYPE_NORMAL) {
             display_body(-1, INVENTORY_WINDOW_TYPE_NORMAL);
         }
+
+#ifdef NXDK
+        if (padMenu == 1) {
+            // The d-pad picks; B cancels; letting go of A chooses.
+            int newIndex = menuItemIndex;
+            if (keyCode == KEY_ARROW_UP && menuItemIndex > 0) {
+                newIndex--;
+            } else if (keyCode == KEY_ARROW_DOWN && menuItemIndex < actionMenuItemsLength - 1) {
+                newIndex++;
+            }
+            if (ipad_pressed(SDL_GAMEPAD_BUTTON_EAST)) {
+                menuItemIndex = actionMenuItemsLength - 1; // Cancel
+                gmouse_3d_highlight_menu_frame(menuItemIndex);
+                win_draw_rect(i_wid, &rect);
+                break;
+            }
+            if (newIndex != menuItemIndex) {
+                menuItemIndex = newIndex;
+                gmouse_3d_highlight_menu_frame(menuItemIndex);
+                win_draw_rect(i_wid, &rect);
+            }
+            renderPresent();
+            sharedFpsLimiter.throttle();
+            continue;
+        }
+#else
+        (void)keyCode;
+#endif
 
         int x;
         int y;
@@ -3452,6 +4339,10 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
     }
 
     mouse_set_position(x, y);
+
+#ifdef NXDK
+    }
+#endif
 
     display_inventory(stack_offset[curr_stack], -1, inventoryWindowType);
 
@@ -3583,7 +4474,8 @@ void inven_action_cursor(int keyCode, int inventoryWindowType)
         break;
     }
 
-    inven_set_mouse(INVENTORY_WINDOW_CURSOR_ARROW);
+    // (The pad keeps the hand cursor.)
+    inven_set_mouse(padMenu != 0 ? INVENTORY_WINDOW_CURSOR_HAND : INVENTORY_WINDOW_CURSOR_ARROW);
 
     if (inventoryWindowType == INVENTORY_WINDOW_TYPE_NORMAL && actionMenuItem != GAME_MOUSE_ACTION_MENU_ITEM_LOOK) {
         display_stats();
@@ -3789,6 +4681,9 @@ int loot_container(Object* a1, Object* a2)
     display_inventory(stack_offset[curr_stack], -1, INVENTORY_WINDOW_TYPE_LOOT);
     display_body(a2->fid, INVENTORY_WINDOW_TYPE_LOOT);
     inven_set_mouse(INVENTORY_WINDOW_CURSOR_HAND);
+#ifdef NXDK
+    ipad_begin(INVENTORY_WINDOW_TYPE_LOOT);
+#endif
 
     bool isCaughtStealing = false;
     int stealingXp = 0;
@@ -3805,6 +4700,9 @@ int loot_container(Object* a1, Object* a2)
         }
 
         int keyCode = get_input();
+#ifdef NXDK
+        keyCode = ipad_frame(keyCode);
+#endif
 
         if (keyCode == KEY_CTRL_Q || keyCode == KEY_CTRL_X || keyCode == KEY_F10) {
             game_quit_with_confirm();
@@ -3890,15 +4788,15 @@ int loot_container(Object* a1, Object* a2)
         } else if (keyCode >= 2500 && keyCode <= 2501) {
             container_exit(keyCode, INVENTORY_WINDOW_TYPE_LOOT);
         } else {
-            if ((mouse_get_buttons() & MOUSE_EVENT_RIGHT_BUTTON_DOWN) != 0) {
+            if (inven_right_down()) {
                 if (immode == INVENTORY_WINDOW_CURSOR_HAND) {
                     inven_set_mouse(INVENTORY_WINDOW_CURSOR_ARROW);
                 } else {
                     inven_set_mouse(INVENTORY_WINDOW_CURSOR_HAND);
                 }
-            } else if ((mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_DOWN) != 0) {
+            } else if (inven_left_down()) {
                 if (keyCode >= 1000 && keyCode <= 1000 + inven_cur_disp) {
-                    if (immode == INVENTORY_WINDOW_CURSOR_ARROW) {
+                    if (inven_menu_mode()) {
                         inven_action_cursor(keyCode, INVENTORY_WINDOW_TYPE_LOOT);
                     } else {
                         int index = keyCode - 1000;
@@ -3922,7 +4820,7 @@ int loot_container(Object* a1, Object* a2)
                         keyCode = -1;
                     }
                 } else if (keyCode >= 2000 && keyCode <= 2000 + inven_cur_disp) {
-                    if (immode == INVENTORY_WINDOW_CURSOR_ARROW) {
+                    if (inven_menu_mode()) {
                         inven_action_cursor(keyCode, INVENTORY_WINDOW_TYPE_LOOT);
                     } else {
                         int index = keyCode - 2000;
@@ -3988,6 +4886,10 @@ int loot_container(Object* a1, Object* a2)
         renderPresent();
         sharedFpsLimiter.throttle();
     }
+
+#ifdef NXDK
+    ipad_end();
+#endif
 
     if (critterCount != 0) {
         obj_delete_list(critters);
@@ -4144,6 +5046,9 @@ int move_inventory(Object* a1, int a2, Object* a3, bool a4)
         gsound_play_sfx_file("ipickup1");
     }
 
+#ifdef NXDK
+    if (!ipad_drag(-1))
+#endif
     do {
         sharedFpsLimiter.mark();
 
@@ -4317,6 +5222,9 @@ static void barter_move_inventory(Object* a1, int quantity, int a3, int a4, Obje
         gsound_play_sfx_file("ipickup1");
     }
 
+#ifdef NXDK
+    if (!ipad_drag(-1))
+#endif
     do {
         sharedFpsLimiter.mark();
 
@@ -4410,6 +5318,9 @@ static void barter_move_from_table_inventory(Object* a1, int quantity, int a3, O
         gsound_play_sfx_file("ipickup1");
     }
 
+#ifdef NXDK
+    if (!ipad_drag(-1))
+#endif
     do {
         sharedFpsLimiter.mark();
 
@@ -4614,6 +5525,9 @@ void barter_inventory(int win, Object* a2, Object* a3, Object* a4, int a5)
     display_table_inventories(win, a3, a4, -1);
 
     inven_set_mouse(INVENTORY_WINDOW_CURSOR_HAND);
+#ifdef NXDK
+    ipad_begin(INVENTORY_WINDOW_TYPE_TRADE);
+#endif
 
     int modifier;
     int npcReactionValue = reaction_get(a2);
@@ -4641,6 +5555,9 @@ void barter_inventory(int win, Object* a2, Object* a3, Object* a4, int a5)
         }
 
         keyCode = get_input();
+#ifdef NXDK
+        keyCode = ipad_frame(keyCode);
+#endif
         if (keyCode == KEY_CTRL_Q || keyCode == KEY_CTRL_X || keyCode == KEY_F10) {
             game_quit_with_confirm();
         }
@@ -4755,15 +5672,15 @@ void barter_inventory(int win, Object* a2, Object* a3, Object* a4, int a5)
         } else if (keyCode >= 2500 && keyCode <= 2501) {
             container_exit(keyCode, INVENTORY_WINDOW_TYPE_TRADE);
         } else {
-            if ((mouse_get_buttons() & MOUSE_EVENT_RIGHT_BUTTON_DOWN) != 0) {
+            if (inven_right_down()) {
                 if (immode == INVENTORY_WINDOW_CURSOR_HAND) {
                     inven_set_mouse(INVENTORY_WINDOW_CURSOR_ARROW);
                 } else {
                     inven_set_mouse(INVENTORY_WINDOW_CURSOR_HAND);
                 }
-            } else if ((mouse_get_buttons() & MOUSE_EVENT_LEFT_BUTTON_DOWN) != 0) {
+            } else if (inven_left_down()) {
                 if (keyCode >= 1000 && keyCode <= 1000 + inven_cur_disp) {
-                    if (immode == INVENTORY_WINDOW_CURSOR_ARROW) {
+                    if (inven_menu_mode()) {
                         inven_action_cursor(keyCode, INVENTORY_WINDOW_TYPE_TRADE);
                         display_table_inventories(win, a3, NULL, -1);
                     } else {
@@ -4779,7 +5696,7 @@ void barter_inventory(int win, Object* a2, Object* a3, Object* a4, int a5)
 
                     keyCode = -1;
                 } else if (keyCode >= 2000 && keyCode <= 2000 + inven_cur_disp) {
-                    if (immode == INVENTORY_WINDOW_CURSOR_ARROW) {
+                    if (inven_menu_mode()) {
                         inven_action_cursor(keyCode, INVENTORY_WINDOW_TYPE_TRADE);
                         display_table_inventories(win, NULL, a4, -1);
                     } else {
@@ -4795,7 +5712,7 @@ void barter_inventory(int win, Object* a2, Object* a3, Object* a4, int a5)
 
                     keyCode = -1;
                 } else if (keyCode >= 2300 && keyCode <= 2300 + inven_cur_disp) {
-                    if (immode == INVENTORY_WINDOW_CURSOR_ARROW) {
+                    if (inven_menu_mode()) {
                         inven_action_cursor(keyCode, INVENTORY_WINDOW_TYPE_TRADE);
                         display_table_inventories(win, a3, NULL, -1);
                     } else {
@@ -4811,7 +5728,7 @@ void barter_inventory(int win, Object* a2, Object* a3, Object* a4, int a5)
 
                     keyCode = -1;
                 } else if (keyCode >= 2400 && keyCode <= 2400 + inven_cur_disp) {
-                    if (immode == INVENTORY_WINDOW_CURSOR_ARROW) {
+                    if (inven_menu_mode()) {
                         inven_action_cursor(keyCode, INVENTORY_WINDOW_TYPE_TRADE);
                         display_table_inventories(win, NULL, a4, -1);
                     } else {
@@ -4897,6 +5814,10 @@ void barter_inventory(int win, Object* a2, Object* a3, Object* a4, int a5)
         renderPresent();
         sharedFpsLimiter.throttle();
     }
+
+#ifdef NXDK
+    ipad_end();
+#endif
 
     item_move_all(a1a, a2);
     obj_erase_object(a1a, NULL);
@@ -5412,12 +6333,20 @@ static int setup_move_timer_win(int inventoryWindowType, Object* item)
         btn = win_register_button(mt_wid, 98, 128, 15, 16, -1, -1, -1, KEY_RETURN, buttonUpData, buttonDownData, NULL, BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+            // The d-pad starts on DONE (A confirms), lit with its label.
+            padnav_set_highlight_rect(btn, 16, 124, 103, 20);
+            padnav_set_focus(btn);
+#endif
         }
 
         // Cancel
         btn = win_register_button(mt_wid, 148, 128, 15, 16, -1, -1, -1, KEY_ESCAPE, buttonUpData, buttonDownData, NULL, BUTTON_FLAG_TRANSPARENT);
         if (btn != -1) {
             win_register_button_sound_func(btn, gsound_red_butt_press, gsound_red_butt_release);
+#ifdef NXDK
+            padnav_set_highlight_rect(btn, 135, 124, 104, 20);
+#endif
         }
     }
 

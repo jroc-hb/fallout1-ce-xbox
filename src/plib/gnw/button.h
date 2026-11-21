@@ -29,6 +29,10 @@ int win_group_radio_buttons(int buttonCount, int* btns);
 void GNW_button_refresh(Window* window, Rect* rect);
 int win_button_press_and_release(int btn);
 #ifdef NXDK
+int win_button_press(int btn);
+int win_button_release(int btn);
+#endif
+#ifdef NXDK
 // Analog-stick pointer assist over UI buttons in the window under the
 // pointer (see pointer_assist.h). Returns false if no button is near, so
 // the map assist can run instead.
