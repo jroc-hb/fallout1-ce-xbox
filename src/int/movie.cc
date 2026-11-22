@@ -209,6 +209,20 @@ static unsigned char* alphaBuf;
 
 static SDL_Surface* gMovieSdlSurface = NULL;
 
+// Fill mode (movieSetFillScreen): frames scaled up to fill the screen, aspect
+// kept. The screen is cleared on a movie's first frame (the area around it
+// would otherwise show what was there before), and the subtitle band, which
+// the scaled picture covers, is drawn over each frame.
+static bool movieFillScreen = false;
+static bool movieFillCleared = false;
+static bool movieSubtitleShown = false;
+static Rect movieSubtitleRect;
+
+void movieSetFillScreen(bool fill)
+{
+    movieFillScreen = fill;
+}
+
 // 0x4783F0
 void movieSetPreDrawFunc(MoviePreDrawFunc* func)
 {
@@ -314,7 +328,41 @@ static void movie_MVE_ShowFrame(SDL_Surface* surface, int srcWidth, int srcHeigh
     }
 
     SDL_SetSurfacePalette(surface, SDL_GetSurfacePalette(gSdlSurface));
-    SDL_BlitSurface(surface, &srcRect, gSdlSurface, &destRect);
+    if (movieFillScreen) {
+        // Its shape as it would be shown (4:3-stretched when scaled), fitted
+        // to the screen.
+        int shownWidth = movieScaleFlag ? 4 * srcWidth / 3 : destWidth;
+        int shownHeight = destHeight;
+        int screenWidth = gSdlSurface->w;
+        int screenHeight = gSdlSurface->h;
+        if (shownWidth > 0 && shownHeight > 0) {
+            if (!movieFillCleared) {
+                SDL_FillSurfaceRect(gSdlSurface, NULL, 0);
+                movieFillCleared = true;
+                destRect.x = 0;
+                destRect.y = 0;
+                destRect.w = screenWidth;
+                destRect.h = screenHeight;
+                svgaMarkDirty(&destRect);
+            }
+            int fitWidth = screenWidth;
+            int fitHeight = shownHeight * screenWidth / shownWidth;
+            if (fitHeight > screenHeight) {
+                fitHeight = screenHeight;
+                fitWidth = shownWidth * screenHeight / shownHeight;
+            }
+            destRect.w = fitWidth;
+            destRect.h = fitHeight;
+            destRect.x = (screenWidth - fitWidth) / 2;
+            destRect.y = (screenHeight - fitHeight) / 2;
+            SDL_BlitSurfaceScaled(surface, &srcRect, gSdlSurface, &destRect, SDL_SCALEMODE_NEAREST);
+            if (movieSubtitleShown && GNWWin != -1) {
+                win_draw_rect(GNWWin, &movieSubtitleRect);
+            }
+        }
+    } else {
+        SDL_BlitSurface(surface, &srcRect, gSdlSurface, &destRect);
+    }
 
 #ifdef NXDK
     // gSdlTextureSurface is not allocated on Xbox; gSdlSurface is uploaded to
@@ -806,6 +854,8 @@ static void doSubtitle()
         rect.lry = v2 + subtitleH;
         rect.ulx = 0;
         win_draw_rect(GNWWin, &rect);
+        movieSubtitleRect = rect;
+        movieSubtitleShown = subtitleList->text != NULL && subtitleList->text[0] != '\0';
 
         myfree(subtitleList->text, __FILE__, __LINE__); // "..\\int\\MOVIE.C", 1108
         myfree(subtitleList, __FILE__, __LINE__); // "..\\int\\MOVIE.C", 1109
@@ -821,6 +871,8 @@ static void doSubtitle()
 // 0x479514
 static int movieStart(int win, char* filePath, int (*a3)())
 {
+    movieFillCleared = false;
+    movieSubtitleShown = false;
     int v15;
     int v16;
     int v17;

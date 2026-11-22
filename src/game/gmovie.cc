@@ -166,6 +166,14 @@ int gmovie_play(int game_movie, int game_movie_flags)
 
     movieSetFlags(movie_flags);
 
+#ifdef NXDK
+    {
+        int fill = 0;
+        config_get_value(&game_config, GAME_CONFIG_DEBUG_KEY, "fill_movies", &fill);
+        movieSetFillScreen(fill != 0);
+    }
+#endif
+
     int oldTextColor;
     int oldFont;
     if (subtitlesEnabled) {

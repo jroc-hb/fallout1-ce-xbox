@@ -176,7 +176,7 @@ Menus are played with the **d-pad**, without the pointer:
 With the pointer showing, **B** right-clicks. In conversations, **Y** opens Barter. In XBOX OPTS, the d-pad moves
 between settings and changes them, **Start** applies and **Back** or **B** cancels. **Y** opens
 the **Dev menu**: settings for comparing versions of features in development (free walking's
-pace and stop) and for testing (MOVIES: turn the cutscenes off). **Start** also backs
+pace and stop) and for testing (MOVIES: turn the cutscenes off; MOVIE SIZE: scale them up to fill the screen). **Start** also backs
 out of the character selection screen.
 
 ## Inventory, looting and bartering

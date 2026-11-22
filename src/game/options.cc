@@ -1966,7 +1966,11 @@ static void SetDefaults(bool a1)
     prf_running = 0;
     subtitles = 0;
     item_highlight = 1;
+#ifdef NXDK
+    combat_speed = 50; // matches gconfig's NXDK default
+#else
     combat_speed = 0;
+#endif
     player_speedup = 0;
     text_delay = 3.5;
     gamma_value = 1.0;

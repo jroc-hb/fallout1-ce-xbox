@@ -39,6 +39,8 @@ void initMovie();
 void movieClose();
 void movieStop();
 int movieSetFlags(int a1);
+// Scale frames up to fill the screen, aspect kept (dev menu MOVIE SIZE).
+void movieSetFillScreen(bool fill);
 void movieSetSubtitleFont(int font);
 void movieSetSubtitleColor(float r, float g, float b);
 void movieSetPaletteFunc(MoviePaletteFunc* func);

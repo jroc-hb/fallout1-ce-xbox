@@ -602,13 +602,19 @@ inventory while the left stick moved the pointer.
   ran inside (roof hidden). Not tested: exit grids, spatial scripts, combat start mid-offset,
   saving mid-offset (the offset is saved with the object; harmless).
 - **Dev menu** (XBOX OPTS, Y or the hint corner; `xo_dev_menu` in xboxopts.cc): a small window
-  over XBOX OPTS built from the same art (title band, four copies of the PAN CENTERS CURSOR
+  over XBOX OPTS built from the same art (title band, five copies of the PAN CENTERS CURSOR
   knob panel, the DONE plate). WALK STYLE HEX/FREE (`stick_walk_free`), FREE WALK PACE
   GLIDE/STRIDE (`[control] free_walk_pace`: 0 = constant speed at the cycle's average step,
   the first free version; 1 = the art's per-frame steps), FREE WALK STOP SLIDE/STEP
   (`free_walk_stop`: 0 = full speed at once and glide back onto the current hex on release;
   1 = the 0.12 s ramp and walking on to a hex ahead), MOVIES OFF/ON (`[debug] disable_fmv`,
-  inverted; `gmovie_play` reads it before every movie, so it applies at once). D-pad up/down/left/right, A turns the
+  inverted; `gmovie_play` reads it before every movie, so it applies at once), MOVIE SIZE
+  NORMAL/FILL (`[debug] fill_movies` -> `movieSetFillScreen`, int/movie.cc: each frame is
+  `SDL_BlitSurfaceScaled` (nearest) into `gSdlSurface` fitted to the screen with its aspect kept
+  (4:3-stretched size when the movie scales), the screen cleared on a movie's first frame, and
+  the current subtitle band re-shown over each frame since the bigger picture covers it).
+  Verified at 720p: the attract movie at 960x720, centred. Subtitles in fill mode not checked.
+  Five knobs fill the window's height at 480p (38 + 5 x 78 + 40 = 468 px): no room for more. D-pad up/down/left/right, A turns the
   selected knob, START/DONE applies (saved with `gconfig_save`), B/BACK cancels. A and B are
   read with the screen capture: walk mode's hidden-pointer A handling otherwise ate A here.
   Verified in XEMU: open, change, apply, reopen shows it, B cancels.
@@ -873,6 +879,10 @@ engine's 32x24 px scroll steps.
   target. Each frame it checks the object still exists by looking for its pointer among nearby
   objects (never dereferencing first); `obj_erase_object` and `obj_disconnect` (pickups) call
   `gmouse_forget_target`, and `gmouse_reset` clears it without touching the object.
+- **Combat speed defaults to the maximum (50) on NXDK** (`gconfig_init` and Preferences'
+  DEFAULT, `SetDefaults` in options.cc): console players rarely find the slider. A
+  `fallout.cfg` that already has `combat_speed` keeps its value, and a save's stored preferences
+  still apply when it loads.
 - The Preferences "Mouse Sensitivity" slider has no effect on Xbox (the scaling in `mouse.cc` is
   in the non-NXDK branch).
 
